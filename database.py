@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import threading
 import json
@@ -5,7 +6,7 @@ from datetime import datetime, date
 from contextlib import contextmanager
 from typing import Optional
 
-DB_PATH = "facta_clt.db"
+DB_PATH = os.getenv("DB_PATH", "facta_clt.db")
 
 _lock = threading.Lock()
 

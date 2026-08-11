@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  facta-clt-atualiza-base-offline:
+    image: facta-clt-atualiza-base-offline:latest
+    environment:
+      - DB_PATH=/app/data/facta_clt.db
+    volumes:
+      - facta_clt_data:/app/data
+    networks:
+      - esteira_default
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.facta-clt-atualiza-base-offline.entrypoints=websecure"
+        - "traefik.http.routers.facta-clt-atualiza-base-offline.rule=Host(`factaclt.esteiradeleads.shop`)"
+        - "traefik.http.routers.facta-clt-atualiza-base-offline.tls.certresolver=letsencrypt"
+        - "traefik.http.services.facta-clt-atualiza-base-offline.loadbalancer.server.port=80"
+
+networks:
+  esteira_default:
+    external: true
+
+volumes:
+  facta_clt_data:
