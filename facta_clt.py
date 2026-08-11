@@ -152,13 +152,12 @@ def autorizar_facta(client: httpx.Client, cpf: str, dados: DadosGerados) -> Tupl
         return None, erro
 
 
-def simular_uuid(client: httpx.Client, token: str, uuid: str) -> Tuple[Optional[dict], Optional[TentativaResultado]]:
+def simular_uuid(client: httpx.Client, uuid: str) -> Tuple[Optional[dict], Optional[TentativaResultado]]:
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "application/json",
         "Origin": ORIGIN,
         "Referer": f"{ORIGIN}/",
-        "Authorization": f"Bearer {token}",
     }
     body = {"uuid": uuid}
     try:
@@ -171,7 +170,7 @@ def simular_uuid(client: httpx.Client, token: str, uuid: str) -> Tuple[Optional[
         return None, erro
 
 
-def simular_clt(cpf: str, token: str, tentativas: int = 5) -> dict:
+def simular_clt(cpf: str, tentativas: int = 5) -> dict:
     """
     Executa o fluxo completo (sincrono, roda em thread via asyncio.to_thread):
     gera dados aleatorios uma unica vez, tenta autorizar + simular ate
@@ -205,7 +204,7 @@ def simular_clt(cpf: str, token: str, tentativas: int = 5) -> dict:
 
             logger.info(f"UUID obtido: {uuid}")
 
-            sim_resp, erro = simular_uuid(client, token, uuid)
+            sim_resp, erro = simular_uuid(client, uuid)
             if sim_resp is not None:
                 return {
                     "status": "ok",

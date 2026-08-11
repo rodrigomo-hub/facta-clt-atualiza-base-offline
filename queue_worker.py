@@ -10,11 +10,10 @@ logger = logging.getLogger("queue_worker")
 
 
 class Job:
-    def __init__(self, job_id: str, req_id: int, cpf: str, token: str, tentativas: int):
+    def __init__(self, job_id: str, req_id: int, cpf: str, tentativas: int):
         self.job_id = job_id
         self.req_id = req_id
         self.cpf = cpf
-        self.token = token
         self.tentativas = tentativas
         self.status = "na_fila"  # na_fila | processando | sucesso | falha
         self.resultado: Optional[dict] = None
@@ -65,10 +64,10 @@ class FilaSimulacao:
     def tamanho_fila(self) -> int:
         return self._fila.qsize()
 
-    async def enfileirar(self, equipe: str, cpf: str, token: str, tentativas: int = 5) -> str:
+    async def enfileirar(self, equipe: str, cpf: str, tentativas: int = 5) -> str:
         job_id = uuid_lib.uuid4().hex[:12]
         req_id = database.registrar_requisicao_criada(equipe, cpf, job_id)
-        job = Job(job_id, req_id, cpf, token, tentativas)
+        job = Job(job_id, req_id, cpf, tentativas)
         self._jobs[job_id] = job
         await self._fila.put(job)
         return job_id
@@ -84,7 +83,7 @@ class FilaSimulacao:
                 job.status = "processando"
                 try:
                     resultado = await asyncio.to_thread(
-                        simular_clt, job.cpf, job.token, job.tentativas
+                        simular_clt, job.cpf, job.tentativas
                     )
                     job.resultado = resultado
                     if resultado["status"] == "ok":

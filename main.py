@@ -41,7 +41,6 @@ async def get_equipe_atual(x_team_key: str = Header(..., alias="X-Team-Key")) ->
 
 class SimularRequest(BaseModel):
     cpf: str = Field(..., description="CPF do cliente, somente numeros")
-    token: str = Field(..., description="Token Bearer da Facta (sem o prefixo 'Bearer ')")
     tentativas: int = Field(default=5, ge=1, le=10)
 
     @field_validator("cpf")
@@ -75,7 +74,7 @@ async def simular_facta_clt(payload: SimularRequest, equipe: dict = Depends(get_
     limite de concorrencia configurado no painel.
     """
     job_id = await fila_global.enfileirar(
-        equipe=equipe["nome"], cpf=payload.cpf, token=payload.token, tentativas=payload.tentativas
+        equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas
     )
     return {"job_id": job_id, "status": "na_fila", "posicao_fila": fila_global.tamanho_fila()}
 
@@ -101,7 +100,7 @@ async def simular_facta_clt_aguardar(
     para quem nao quer fazer polling). Sujeito ao timeout informado.
     """
     job_id = await fila_global.enfileirar(
-        equipe=equipe["nome"], cpf=payload.cpf, token=payload.token, tentativas=payload.tentativas
+        equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas
     )
     job = fila_global.get_job(job_id)
     try:
