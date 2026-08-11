@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Facta CLT - Painel</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0f1115;
+    color: #e6e6e6;
+    margin: 0;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 24px; }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: #1a1d24;
+    border: 1px solid #2a2d35;
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .card .num { font-size: 28px; font-weight: 600; }
+  .card .label { font-size: 12px; color: #999; margin-top: 4px; }
+  .ok { color: #4ade80; }
+  .warn { color: #fbbf24; }
+  .err { color: #f87171; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #2a2d35; }
+  th { color: #999; font-weight: 500; }
+  section { margin-bottom: 32px; }
+  .section-title { font-size: 14px; color: #ccc; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .config-row { display: flex; gap: 10px; align-items: center; }
+  input[type=number] {
+    background: #1a1d24; border: 1px solid #2a2d35; color: #fff;
+    padding: 6px 10px; border-radius: 6px; width: 80px;
+  }
+  button {
+    background: #3b82f6; color: white; border: none; padding: 7px 14px;
+    border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { background: #2563eb; }
+  .badge { padding: 2px 8px; border-radius: 12px; font-size: 11px; }
+  .badge-autorizado { background: #14532d; color: #4ade80; }
+  .badge-falha { background: #7c2d12; color: #fb923c; }
+  .badge-bloqueio_suspeito { background: #7f1d1d; color: #f87171; }
+  .badge-na_fila { background: #374151; color: #9ca3af; }
+  .badge-erro_interno { background: #7f1d1d; color: #f87171; }
+</style>
+</head>
+<body>
+  <h1>Facta CLT — Painel de Simulações</h1>
+  <div class="sub">Volume do dia, status por equipe e controle de concorrência da fila.</div>
+
+  <div class="cards" id="cards"></div>
+
+  <section>
+    <div class="section-title">Concorrência da fila</div>
+    <div class="config-row">
+      <span>Simulações simultâneas:</span>
+      <input type="number" id="concorrenciaInput" min="1" max="50">
+      <button onclick="salvarConcorrencia()">Salvar</button>
+      <span id="filaAtual" style="color:#999; font-size:12px;"></span>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Por equipe (hoje)</div>
+    <table id="tabelaEquipes">
+      <thead><tr><th>Equipe</th><th>Autorizado</th><th>Falha</th><th>Bloqueio suspeito</th><th>Na fila</th><th>Total</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="section-title">Últimas requisições</div>
+    <table id="tabelaUltimas">
+      <thead><tr><th>Equipe</th><th>CPF</th><th>Status</th><th>Tentativas</th><th>Quando</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+<script>
+async function carregar() {
+  const stats = await fetch('/admin/stats/hoje').then(r => r.json());
+  const config = await fetch('/admin/config').then(r => r.json());
+  const ultimas = await fetch('/admin/requisicoes?limite=30').then(r => r.json());
+
+  const cardsDiv = document.getElementById('cards');
+  const ps = stats.por_status || {};
+  cardsDiv.innerHTML = `
+    <div class="card"><div class="num">${stats.total}</div><div class="label">Total hoje</div></div>
+    <div class="card"><div class="num ok">${ps.autorizado || 0}</div><div class="label">Autorizado</div></div>
+    <div class="card"><div class="num warn">${ps.falha || 0}</div><div class="label">Falha</div></div>
+    <div class="card"><div class="num err">${ps.bloqueio_suspeito || 0}</div><div class="label">Bloqueio suspeito</div></div>
+    <div class="card"><div class="num">${ps.na_fila || 0}</div><div class="label">Na fila</div></div>
+  `;
+
+  document.getElementById('concorrenciaInput').value = config.concorrencia;
+  document.getElementById('filaAtual').textContent = `fila atual: ${config.tamanho_fila_atual}`;
+
+  const tbodyEquipes = document.querySelector('#tabelaEquipes tbody');
+  tbodyEquipes.innerHTML = '';
+  for (const [equipe, statusMap] of Object.entries(stats.por_equipe || {})) {
+    const total = Object.values(statusMap).reduce((a, b) => a + b, 0);
+    tbodyEquipes.innerHTML += `<tr>
+      <td>${equipe}</td>
+      <td>${statusMap.autorizado || 0}</td>
+      <td>${statusMap.falha || 0}</td>
+      <td>${statusMap.bloqueio_suspeito || 0}</td>
+      <td>${statusMap.na_fila || 0}</td>
+      <td>${total}</td>
+    </tr>`;
+  }
+
+  const tbodyUltimas = document.querySelector('#tabelaUltimas tbody');
+  tbodyUltimas.innerHTML = '';
+  for (const r of ultimas) {
+    const hora = new Date(r.criado_em + 'Z').toLocaleTimeString('pt-BR');
+    tbodyUltimas.innerHTML += `<tr>
+      <td>${r.equipe}</td>
+      <td>${r.cpf}</td>
+      <td><span class="badge badge-${r.status}">${r.status}</span></td>
+      <td>${r.tentativas ?? '-'}</td>
+      <td>${hora}</td>
+    </tr>`;
+  }
+}
+
+async function salvarConcorrencia() {
+  const valor = parseInt(document.getElementById('concorrenciaInput').value, 10);
+  await fetch('/admin/config/concorrencia', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ concorrencia: valor })
+  });
+  carregar();
+}
+
+carregar();
+setInterval(carregar, 5000);
+</script>
+</body>
+</html>
