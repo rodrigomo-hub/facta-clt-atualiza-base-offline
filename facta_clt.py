@@ -186,6 +186,14 @@ def simular_uuid(client: httpx.Client, uuid: str) -> Tuple[Optional[dict], Optio
         _aguardar_rate_limit()
         resp = client.post(URL_SIMULAR, headers=headers, data=body, timeout=None)
         resp.raise_for_status()
+        if not resp.text.strip():
+            # Facta as vezes responde 200 com corpo vazio - nao e erro de
+            # rede, e uma resposta valida (porem sem dado). Classifica
+            # separado para nao ficar reinsistindo como se fosse falha de
+            # conexao.
+            return None, TentativaResultado(
+                ok=False, tipo_erro="sem_retorno", detalhe="HTTP 200 com corpo vazio", status_code=200
+            )
         return resp.json(), None
     except Exception as e:
         erro = _classificar_erro(e)
@@ -206,6 +214,8 @@ def simular_clt(cpf: str, tentativas: int = 5) -> dict:
 
     ultimo_erro: Optional[TentativaResultado] = None
     chamadas_realizadas = 0
+    sem_retorno_consecutivos = 0
+    MAX_SEM_RETORNO = 2  # depois disso, para de tentar e marca como "sem_retorno"
 
     with httpx.Client() as client:
         for i in range(1, tentativas + 1):
@@ -248,6 +258,16 @@ def simular_clt(cpf: str, tentativas: int = 5) -> dict:
             ultimo_erro = erro
             if erro and erro.tipo_erro == "bloqueio_suspeito":
                 break
+            if erro and erro.tipo_erro == "sem_retorno":
+                sem_retorno_consecutivos += 1
+                if sem_retorno_consecutivos >= MAX_SEM_RETORNO:
+                    logger.info(
+                        f"Facta respondeu vazio {sem_retorno_consecutivos}x seguidas - "
+                        f"parando de tentar (nao insiste mais para este CPF)"
+                    )
+                    break
+            else:
+                sem_retorno_consecutivos = 0
 
     return {
         "status": "falha",

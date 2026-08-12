@@ -111,9 +111,12 @@ class FilaSimulacao:
                     else:
                         job.status = "falha"
                         tipo_erro = resultado.get("tipo_erro", "desconhecido")
-                        status_final = (
-                            "bloqueio_suspeito" if tipo_erro == "bloqueio_suspeito" else "falha"
-                        )
+                        if tipo_erro == "bloqueio_suspeito":
+                            status_final = "bloqueio_suspeito"
+                        elif tipo_erro == "sem_retorno":
+                            status_final = "sem_retorno"
+                        else:
+                            status_final = "falha"
                         database.finalizar_requisicao(
                             job.req_id,
                             status=status_final,
