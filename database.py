@@ -48,12 +48,17 @@ def init_db():
                 tipo_erro TEXT,
                 detalhe_erro TEXT,
                 tentativas INTEGER,
+                chamadas_realizadas INTEGER,
                 job_id TEXT,
                 criado_em TEXT NOT NULL,
                 finalizado_em TEXT,
                 resultado_resumo TEXT
             )
         """)
+        # Migracao leve para bancos ja existentes sem a coluna nova
+        colunas = [r["name"] for r in conn.execute("PRAGMA table_info(requisicoes)").fetchall()]
+        if "chamadas_realizadas" not in colunas:
+            conn.execute("ALTER TABLE requisicoes ADD COLUMN chamadas_realizadas INTEGER")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS config (
                 chave TEXT PRIMARY KEY,
@@ -119,11 +124,12 @@ def finalizar_requisicao(
     tipo_erro: Optional[str] = None,
     detalhe_erro: Optional[str] = None,
     resultado_resumo: Optional[dict] = None,
+    chamadas_realizadas: Optional[int] = None,
 ):
     with get_conn() as conn:
         conn.execute(
             "UPDATE requisicoes SET status=?, tentativas=?, tipo_erro=?, detalhe_erro=?, "
-            "finalizado_em=?, resultado_resumo=? WHERE id=?",
+            "finalizado_em=?, resultado_resumo=?, chamadas_realizadas=? WHERE id=?",
             (
                 status,
                 tentativas,
@@ -131,6 +137,7 @@ def finalizar_requisicao(
                 detalhe_erro,
                 datetime.utcnow().isoformat(),
                 json.dumps(resultado_resumo, ensure_ascii=False) if resultado_resumo else None,
+                chamadas_realizadas,
                 req_id,
             ),
         )
@@ -174,6 +181,27 @@ def stats_hoje(equipe: Optional[str] = None) -> dict:
             "total": total,
             "por_status": por_status,
             "por_equipe": por_equipe,
+        }
+
+
+def stats_capacidade_hoje() -> dict:
+    """
+    Agrega chamadas HTTP reais feitas hoje (nao jobs, chamadas de fato) para
+    calcular throughput real vs capacidade teorica do rate limiter.
+    """
+    hoje = date.today().isoformat()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as total_jobs, "
+            "SUM(COALESCE(chamadas_realizadas, 0)) as total_chamadas, "
+            "AVG(chamadas_realizadas) as media_chamadas_por_job "
+            "FROM requisicoes WHERE date(criado_em) = ? AND chamadas_realizadas IS NOT NULL",
+            (hoje,),
+        ).fetchone()
+        return {
+            "total_jobs_processados_hoje": row["total_jobs"] or 0,
+            "total_chamadas_http_hoje": row["total_chamadas"] or 0,
+            "media_chamadas_por_job": round(row["media_chamadas_por_job"], 2) if row["media_chamadas_por_job"] else 0,
         }
 
 

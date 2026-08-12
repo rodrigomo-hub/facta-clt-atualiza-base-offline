@@ -106,6 +106,7 @@ class FilaSimulacao:
                             status="autorizado",
                             tentativas=resultado.get("tentativa"),
                             resultado_resumo={"uuid": resultado.get("uuid")},
+                            chamadas_realizadas=resultado.get("chamadas_realizadas"),
                         )
                     else:
                         job.status = "falha"
@@ -118,6 +119,7 @@ class FilaSimulacao:
                             status=status_final,
                             tipo_erro=tipo_erro,
                             detalhe_erro=resultado.get("detalhe_erro"),
+                            chamadas_realizadas=resultado.get("chamadas_realizadas"),
                         )
                         if tipo_erro == "bloqueio_suspeito":
                             logger.warning(

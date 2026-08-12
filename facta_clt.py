@@ -205,12 +205,14 @@ def simular_clt(cpf: str, tentativas: int = 5) -> dict:
     logger.info(f"Dados gerados: nome={dados.nome_completo} email={dados.email} tel={dados.telefone_formatado}")
 
     ultimo_erro: Optional[TentativaResultado] = None
+    chamadas_realizadas = 0
 
     with httpx.Client() as client:
         for i in range(1, tentativas + 1):
             logger.info(f"--- Tentativa {i} de {tentativas} ---")
 
             aut_resp, erro = autorizar_facta(client, cpf, dados)
+            chamadas_realizadas += 1
             if aut_resp is None:
                 ultimo_erro = erro
                 if erro and erro.tipo_erro == "bloqueio_suspeito":
@@ -228,12 +230,14 @@ def simular_clt(cpf: str, tentativas: int = 5) -> dict:
             logger.info(f"UUID obtido: {uuid}")
 
             sim_resp, erro = simular_uuid(client, uuid)
+            chamadas_realizadas += 1
             if sim_resp is not None:
                 return {
                     "status": "ok",
                     "resultado": sim_resp,
                     "uuid": uuid,
                     "tentativa": i,
+                    "chamadas_realizadas": chamadas_realizadas,
                     "dados_gerados": {
                         "nome": dados.nome_completo,
                         "email": dados.email,
@@ -247,6 +251,7 @@ def simular_clt(cpf: str, tentativas: int = 5) -> dict:
 
     return {
         "status": "falha",
+        "chamadas_realizadas": chamadas_realizadas,
         "mensagem": f"Nenhuma tentativa retornou resultado apos {tentativas} tentativas.",
         "tipo_erro": ultimo_erro.tipo_erro if ultimo_erro else "desconhecido",
         "detalhe_erro": ultimo_erro.detalhe if ultimo_erro else None,

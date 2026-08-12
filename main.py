@@ -161,6 +161,39 @@ async def stats_hoje(equipe: str | None = None):
     return database.stats_hoje(equipe)
 
 
+@app.get("/admin/capacidade")
+async def capacidade():
+    """
+    Calcula throughput teorico (baseado no rate limiter atual) vs uso real
+    de hoje, e projeta quanto tempo levaria para processar um volume diario
+    dado. Ajuda a planejar se o intervalo/concorrencia atual aguenta o
+    volume de leads do dia.
+    """
+    import facta_clt
+
+    intervalo = facta_clt.INTERVALO_MINIMO_SEGUNDOS
+    chamadas_por_hora = round(3600 / intervalo, 1) if intervalo > 0 else None
+    chamadas_por_dia_24h = round(chamadas_por_hora * 24, 0) if chamadas_por_hora else None
+
+    capacidade_hoje = database.stats_capacidade_hoje()
+    media_chamadas = capacidade_hoje["media_chamadas_por_job"] or 2.0  # assume 2 (auth+sim) se sem dado ainda
+
+    cpfs_por_dia_estimado = (
+        round(chamadas_por_dia_24h / media_chamadas) if chamadas_por_dia_24h and media_chamadas else None
+    )
+
+    return {
+        "intervalo_minimo_segundos": intervalo,
+        "chamadas_por_hora_teorico": chamadas_por_hora,
+        "chamadas_por_dia_teorico_24h": chamadas_por_dia_24h,
+        "media_chamadas_por_cpf_hoje": media_chamadas,
+        "cpfs_por_dia_estimado_rodando_24h": cpfs_por_dia_estimado,
+        "total_chamadas_http_hoje": capacidade_hoje["total_chamadas_http_hoje"],
+        "total_jobs_processados_hoje": capacidade_hoje["total_jobs_processados_hoje"],
+        "tamanho_fila_atual": fila_global.tamanho_fila(),
+    }
+
+
 @app.get("/admin/requisicoes")
 async def ultimas_requisicoes(limite: int = 50, equipe: str | None = None):
     return database.ultimas_requisicoes(limite, equipe)
