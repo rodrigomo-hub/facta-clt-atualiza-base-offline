@@ -73,10 +73,15 @@ async def simular_facta_clt(payload: SimularRequest, equipe: dict = Depends(get_
     sobrecarreguem a Facta de uma vez - o processamento real respeita o
     limite de concorrencia configurado no painel.
     """
-    job_id = await fila_global.enfileirar(
+    job_id, ja_existia = await fila_global.enfileirar(
         equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas
     )
-    return {"job_id": job_id, "status": "na_fila", "posicao_fila": fila_global.tamanho_fila()}
+    return {
+        "job_id": job_id,
+        "status": "na_fila" if not ja_existia else "ja_estava_na_fila",
+        "posicao_fila": fila_global.tamanho_fila(),
+        "duplicata_evitada": ja_existia,
+    }
 
 
 @app.get("/job/{job_id}")
@@ -99,7 +104,7 @@ async def simular_facta_clt_aguardar(
     Mesmo fluxo, mas aguarda o resultado antes de responder (uso mais simples
     para quem nao quer fazer polling). Sujeito ao timeout informado.
     """
-    job_id = await fila_global.enfileirar(
+    job_id, _ja_existia = await fila_global.enfileirar(
         equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas
     )
     job = fila_global.get_job(job_id)

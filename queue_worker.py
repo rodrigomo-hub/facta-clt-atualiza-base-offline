@@ -30,6 +30,7 @@ class FilaSimulacao:
     def __init__(self):
         self._fila: asyncio.Queue[Job] = asyncio.Queue()
         self._jobs: dict[str, Job] = {}
+        self._cpfs_ativos: dict[str, str] = {}  # cpf -> job_id (na_fila/processando)
         self._workers: list[asyncio.Task] = []
         self._concorrencia_atual = 0
         self._lock = asyncio.Lock()
@@ -64,13 +65,25 @@ class FilaSimulacao:
     def tamanho_fila(self) -> int:
         return self._fila.qsize()
 
-    async def enfileirar(self, equipe: str, cpf: str, tentativas: int = 5) -> str:
+    async def enfileirar(self, equipe: str, cpf: str, tentativas: int = 5) -> tuple[str, bool]:
+        """
+        Retorna (job_id, ja_existia). Se o CPF ja estiver na fila ou sendo
+        processado, devolve o job_id existente em vez de criar duplicata -
+        evita gastar chamadas (e rate limit) repetidas para o mesmo CPF.
+        """
+        job_existente = self._cpfs_ativos.get(cpf)
+        if job_existente and job_existente in self._jobs:
+            job = self._jobs[job_existente]
+            if job.status in ("na_fila", "processando"):
+                return job_existente, True
+
         job_id = uuid_lib.uuid4().hex[:12]
         req_id = database.registrar_requisicao_criada(equipe, cpf, job_id)
         job = Job(job_id, req_id, cpf, tentativas)
         self._jobs[job_id] = job
+        self._cpfs_ativos[cpf] = job_id
         await self._fila.put(job)
-        return job_id
+        return job_id, False
 
     def get_job(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)
@@ -119,6 +132,8 @@ class FilaSimulacao:
                     )
                     logger.exception(f"Erro processando job {job.job_id}")
                 finally:
+                    if self._cpfs_ativos.get(job.cpf) == job.job_id:
+                        del self._cpfs_ativos[job.cpf]
                     job.evento.set()
                     self._fila.task_done()
         except asyncio.CancelledError:
