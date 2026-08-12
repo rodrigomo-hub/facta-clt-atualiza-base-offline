@@ -250,14 +250,7 @@ async def diagnostico_facta():
 
 @app.get("/health")
 async def health():
-    esta_pausado, segundos_restantes = fila_global.pausado()
-    return {
-        "status": "ok",
-        "fila": fila_global.tamanho_fila(),
-        "concorrencia": fila_global.concorrencia_atual(),
-        "pausado_por_bloqueio": esta_pausado,
-        "segundos_ate_retomar": segundos_restantes,
-    }
+    return {"status": "ok", "fila": fila_global.tamanho_fila(), "concorrencia": fila_global.concorrencia_atual()}
 
 
 # ============================================================
