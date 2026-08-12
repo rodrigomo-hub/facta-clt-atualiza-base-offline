@@ -52,6 +52,7 @@
   .badge-bloqueio_suspeito { background: #7f1d1d; color: #f87171; }
   .badge-na_fila { background: #374151; color: #9ca3af; }
   .badge-erro_interno { background: #7f1d1d; color: #f87171; }
+  .badge-sem_retorno { background: #713f12; color: #fbbf24; }
   .key-box {
     background: #1a1d24; border: 1px solid #2a2d35; border-radius: 8px;
     padding: 10px 12px; font-family: monospace; font-size: 13px;
@@ -95,7 +96,7 @@
   <section>
     <div class="section-title">Por equipe (hoje)</div>
     <table id="tabelaEquipes">
-      <thead><tr><th>Equipe</th><th>Autorizado</th><th>Falha</th><th>Bloqueio suspeito</th><th>Na fila</th><th>Total</th></tr></thead>
+      <thead><tr><th>Equipe</th><th>Autorizado</th><th>Falha</th><th>Sem retorno</th><th>Bloqueio suspeito</th><th>Na fila</th><th>Total</th></tr></thead>
       <tbody></tbody>
     </table>
   </section>
@@ -120,6 +121,7 @@ async function carregar() {
     <div class="card"><div class="num">${stats.total}</div><div class="label">Total hoje</div></div>
     <div class="card"><div class="num ok">${ps.autorizado || 0}</div><div class="label">Autorizado</div></div>
     <div class="card"><div class="num warn">${ps.falha || 0}</div><div class="label">Falha</div></div>
+    <div class="card"><div class="num warn">${ps.sem_retorno || 0}</div><div class="label">Sem retorno</div></div>
     <div class="card"><div class="num err">${ps.bloqueio_suspeito || 0}</div><div class="label">Bloqueio suspeito</div></div>
     <div class="card"><div class="num">${ps.na_fila || 0}</div><div class="label">Na fila</div></div>
   `;
@@ -135,6 +137,7 @@ async function carregar() {
       <td>${equipe}</td>
       <td>${statusMap.autorizado || 0}</td>
       <td>${statusMap.falha || 0}</td>
+      <td>${statusMap.sem_retorno || 0}</td>
       <td>${statusMap.bloqueio_suspeito || 0}</td>
       <td>${statusMap.na_fila || 0}</td>
       <td>${total}</td>
