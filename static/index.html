@@ -188,7 +188,27 @@ async function carregarEquipes() {
   const div = document.getElementById('listaEquipes');
   if (!equipes.length) { div.innerHTML = ''; return; }
   div.innerHTML = '<div class="section-title" style="margin-top:0;">Equipes cadastradas</div>' +
-    equipes.map(e => `<div class="equipe-row"><span>${e.nome}</span><span style="color:#666;">${e.ativo ? 'ativa' : 'inativa'}</span></div>`).join('');
+    equipes.map(e => `<div class="equipe-row">
+      <span>${e.nome}${!e.ativo ? ' (inativa)' : ''}</span>
+      <span style="display:flex; align-items:center; gap:6px;">
+        <span style="color:#666; font-size:12px;">prioridade</span>
+        <input type="number" min="0" max="10" value="${e.prioridade || 0}"
+               style="width:50px; background:#1a1d24; border:1px solid #2a2d35; color:#fff; padding:4px 6px; border-radius:4px;"
+               id="prio-${e.api_key}">
+        <button class="copy-btn" onclick="salvarPrioridade('${e.api_key}')">Salvar</button>
+      </span>
+    </div>`).join('');
+}
+
+async function salvarPrioridade(apiKey) {
+  const input = document.getElementById(`prio-${apiKey}`);
+  const prioridade = parseInt(input.value, 10);
+  await fetch('/admin/equipes/prioridade', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey, prioridade })
+  });
+  carregarEquipes();
 }
 
 async function salvarConcorrencia() {

@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import logging
 import uuid as uuid_lib
 from typing import Optional
@@ -7,6 +8,8 @@ import database
 from facta_clt import simular_clt
 
 logger = logging.getLogger("queue_worker")
+
+_contador_sequencia = itertools.count()
 
 
 class Job:
@@ -22,13 +25,17 @@ class Job:
 
 class FilaSimulacao:
     """
-    Fila com N workers concorrentes (padrao definido no banco, editavel via
-    painel). Evita disparar todas as simulacoes de uma vez (que e o que
-    causava sobrecarga vindo do n8n).
+    Fila com prioridade + N workers concorrentes (padrao definido no banco,
+    editavel via painel). Jobs de equipes com prioridade maior furam a fila
+    na frente dos que ja estao esperando, sem alterar a capacidade total de
+    processamento (que continua limitada pelo rate limiter global).
     """
 
     def __init__(self):
-        self._fila: asyncio.Queue[Job] = asyncio.Queue()
+        # item: (prioridade_invertida, sequencia, job) - PriorityQueue e min-heap,
+        # entao usamos -prioridade para que maior prioridade saia primeiro; a
+        # sequencia garante ordem FIFO dentro do mesmo nivel de prioridade.
+        self._fila: asyncio.PriorityQueue = asyncio.PriorityQueue()
         self._jobs: dict[str, Job] = {}
         self._cpfs_ativos: dict[str, str] = {}  # cpf -> job_id (na_fila/processando)
         self._workers: list[asyncio.Task] = []
@@ -65,11 +72,13 @@ class FilaSimulacao:
     def tamanho_fila(self) -> int:
         return self._fila.qsize()
 
-    async def enfileirar(self, equipe: str, cpf: str, tentativas: int = 5) -> tuple[str, bool]:
+    async def enfileirar(self, equipe: str, cpf: str, tentativas: int = 5, prioridade: int = 0) -> tuple[str, bool]:
         """
         Retorna (job_id, ja_existia). Se o CPF ja estiver na fila ou sendo
         processado, devolve o job_id existente em vez de criar duplicata -
         evita gastar chamadas (e rate limit) repetidas para o mesmo CPF.
+        `prioridade` maior fura a frente dos jobs de prioridade menor ja
+        esperando na fila.
         """
         job_existente = self._cpfs_ativos.get(cpf)
         if job_existente and job_existente in self._jobs:
@@ -82,7 +91,8 @@ class FilaSimulacao:
         job = Job(job_id, req_id, cpf, tentativas)
         self._jobs[job_id] = job
         self._cpfs_ativos[cpf] = job_id
-        await self._fila.put(job)
+        seq = next(_contador_sequencia)
+        await self._fila.put((-prioridade, seq, job))
         return job_id, False
 
     def get_job(self, job_id: str) -> Optional[Job]:
@@ -92,7 +102,7 @@ class FilaSimulacao:
         logger.info(f"Worker {worker_num} iniciado")
         try:
             while True:
-                job = await self._fila.get()
+                _prioridade_invertida, _seq, job = await self._fila.get()
                 job.status = "processando"
                 try:
                     resultado = await asyncio.to_thread(

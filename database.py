@@ -36,9 +36,13 @@ def init_db():
                 api_key TEXT PRIMARY KEY,
                 nome TEXT NOT NULL,
                 ativo INTEGER NOT NULL DEFAULT 1,
+                prioridade INTEGER NOT NULL DEFAULT 0,
                 criado_em TEXT NOT NULL
             )
         """)
+        colunas_equipes = [r["name"] for r in conn.execute("PRAGMA table_info(equipes)").fetchall()]
+        if "prioridade" not in colunas_equipes:
+            conn.execute("ALTER TABLE equipes ADD COLUMN prioridade INTEGER NOT NULL DEFAULT 0")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS requisicoes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,8 +107,15 @@ def criar_equipe(api_key: str, nome: str):
 
 def listar_equipes() -> list[dict]:
     with get_conn() as conn:
-        rows = conn.execute("SELECT api_key, nome, ativo, criado_em FROM equipes").fetchall()
+        rows = conn.execute("SELECT api_key, nome, ativo, prioridade, criado_em FROM equipes").fetchall()
         return [dict(r) for r in rows]
+
+
+def atualizar_prioridade_equipe(api_key: str, prioridade: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE equipes SET prioridade = ? WHERE api_key = ?", (prioridade, api_key)
+        )
 
 
 def registrar_requisicao_criada(equipe: str, cpf: str, job_id: str) -> int:

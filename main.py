@@ -56,6 +56,11 @@ class NovaEquipeRequest(BaseModel):
     nome: str
 
 
+class PrioridadeEquipeRequest(BaseModel):
+    api_key: str
+    prioridade: int = Field(..., ge=0, le=10)
+
+
 class ConcorrenciaRequest(BaseModel):
     concorrencia: int = Field(..., ge=1, le=50)
 
@@ -74,7 +79,8 @@ async def simular_facta_clt(payload: SimularRequest, equipe: dict = Depends(get_
     limite de concorrencia configurado no painel.
     """
     job_id, ja_existia = await fila_global.enfileirar(
-        equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas
+        equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas,
+        prioridade=equipe.get("prioridade", 0),
     )
     return {
         "job_id": job_id,
@@ -105,7 +111,8 @@ async def simular_facta_clt_aguardar(
     para quem nao quer fazer polling). Sujeito ao timeout informado.
     """
     job_id, _ja_existia = await fila_global.enfileirar(
-        equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas
+        equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas,
+        prioridade=equipe.get("prioridade", 0),
     )
     job = fila_global.get_job(job_id)
     try:
@@ -132,6 +139,15 @@ async def criar_equipe(payload: NovaEquipeRequest):
 @app.get("/admin/equipes")
 async def listar_equipes():
     return database.listar_equipes()
+
+
+@app.post("/admin/equipes/prioridade")
+async def set_prioridade_equipe(payload: PrioridadeEquipeRequest):
+    equipe = database.get_equipe(payload.api_key)
+    if not equipe:
+        raise HTTPException(status_code=404, detail="Equipe nao encontrada")
+    database.atualizar_prioridade_equipe(payload.api_key, payload.prioridade)
+    return {"nome": equipe["nome"], "prioridade": payload.prioridade}
 
 
 # ============================================================
