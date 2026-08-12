@@ -121,8 +121,10 @@ class FilaSimulacao:
                     else:
                         job.status = "falha"
                         tipo_erro = resultado.get("tipo_erro", "desconhecido")
-                        if tipo_erro == "bloqueio_suspeito":
-                            status_final = "bloqueio_suspeito"
+                        if tipo_erro == "bloqueio_ip":
+                            status_final = "bloqueio_ip"
+                        elif tipo_erro == "rate_limit":
+                            status_final = "rate_limit"
                         elif tipo_erro == "sem_retorno":
                             status_final = "sem_retorno"
                         else:
@@ -134,9 +136,14 @@ class FilaSimulacao:
                             detalhe_erro=resultado.get("detalhe_erro"),
                             chamadas_realizadas=resultado.get("chamadas_realizadas"),
                         )
-                        if tipo_erro == "bloqueio_suspeito":
+                        if tipo_erro == "bloqueio_ip":
                             logger.warning(
-                                f"POSSIVEL BLOQUEIO detectado para cpf={job.cpf}: "
+                                f"BLOQUEIO DE IP detectado para cpf={job.cpf}: "
+                                f"{resultado.get('detalhe_erro')}"
+                            )
+                        elif tipo_erro == "rate_limit":
+                            logger.info(
+                                f"Rate limit (throttle esperado) para cpf={job.cpf}: "
                                 f"{resultado.get('detalhe_erro')}"
                             )
                 except Exception as e:

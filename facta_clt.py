@@ -122,14 +122,16 @@ def _aguardar_rate_limit():
 # Codigos/paravras que sinalizam possivel bloqueio de IP ou rate-limit,
 # em vez de erro generico de rede. Usado so para classificar e alertar,
 # nao para tentar contornar.
-STATUS_BLOQUEIO = {403, 429}
-PALAVRAS_BLOQUEIO = ("blocked", "bloqueado", "rate limit", "too many requests", "forbidden")
+STATUS_BLOQUEIO_IP = {403}  # bloqueio real (ex: Cloudflare "Just a moment")
+STATUS_RATE_LIMIT = {429}  # throttle esperado sob volume, nao e bloqueio
+PALAVRAS_BLOQUEIO_IP = ("blocked", "bloqueado", "forbidden", "just a moment")
+PALAVRAS_RATE_LIMIT = ("rate limit", "too many requests", "excessivo")
 
 
 @dataclass
 class TentativaResultado:
     ok: bool
-    tipo_erro: Optional[str] = None  # "bloqueio_suspeito" | "erro_rede" | "sem_uuid" | None
+    tipo_erro: Optional[str] = None  # "bloqueio_ip" | "rate_limit" | "erro_rede" | "sem_uuid" | "sem_retorno" | None
     detalhe: Optional[str] = None
     status_code: Optional[int] = None
 
@@ -140,11 +142,14 @@ def _classificar_erro(e: Exception) -> TentativaResultado:
     if isinstance(e, httpx.HTTPStatusError):
         status_code = e.response.status_code
         detalhe = f"HTTP {status_code}: {e.response.text[:200]}"
-        if status_code in STATUS_BLOQUEIO:
-            return TentativaResultado(ok=False, tipo_erro="bloqueio_suspeito", detalhe=detalhe, status_code=status_code)
         corpo_lower = e.response.text.lower()
-        if any(p in corpo_lower for p in PALAVRAS_BLOQUEIO):
-            return TentativaResultado(ok=False, tipo_erro="bloqueio_suspeito", detalhe=detalhe, status_code=status_code)
+
+        if status_code in STATUS_BLOQUEIO_IP or any(p in corpo_lower for p in PALAVRAS_BLOQUEIO_IP):
+            return TentativaResultado(ok=False, tipo_erro="bloqueio_ip", detalhe=detalhe, status_code=status_code)
+
+        if status_code in STATUS_RATE_LIMIT or any(p in corpo_lower for p in PALAVRAS_RATE_LIMIT):
+            return TentativaResultado(ok=False, tipo_erro="rate_limit", detalhe=detalhe, status_code=status_code)
+
     return TentativaResultado(ok=False, tipo_erro="erro_rede", detalhe=detalhe, status_code=status_code)
 
 
@@ -225,8 +230,8 @@ def simular_clt(cpf: str, tentativas: int = 5) -> dict:
             chamadas_realizadas += 1
             if aut_resp is None:
                 ultimo_erro = erro
-                if erro and erro.tipo_erro == "bloqueio_suspeito":
-                    # Nao adianta insistir se o sinal e de bloqueio/rate-limit;
+                if erro and erro.tipo_erro == "bloqueio_ip":
+                    # Bloqueio real (ex: Cloudflare) - nao adianta insistir,
                     # aborta as tentativas restantes e reporta pra ficar visivel.
                     break
                 continue
@@ -256,7 +261,7 @@ def simular_clt(cpf: str, tentativas: int = 5) -> dict:
                     },
                 }
             ultimo_erro = erro
-            if erro and erro.tipo_erro == "bloqueio_suspeito":
+            if erro and erro.tipo_erro == "bloqueio_ip":
                 break
             if erro and erro.tipo_erro == "sem_retorno":
                 sem_retorno_consecutivos += 1
