@@ -5,6 +5,9 @@ Replica o fluxo n8n: Code4 (gera dados aleatorios) -> TENTATIVAS3 (5x)
 import random
 import unicodedata
 import logging
+import os
+import threading
+import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -98,6 +101,24 @@ class FactaCltError(Exception):
     pass
 
 
+# Limitador de taxa global para chamadas a Facta - evita disparar varias
+# requisicoes quase simultaneas mesmo com concorrencia > 1 na fila, que
+# estava causando 429 "Numero excessivo de requisicoes" no lado da Facta.
+_ultimo_disparo = 0.0
+_lock_rate_limit = threading.Lock()
+INTERVALO_MINIMO_SEGUNDOS = float(os.getenv("FACTA_INTERVALO_MINIMO_SEGUNDOS", "1.2"))
+
+
+def _aguardar_rate_limit():
+    global _ultimo_disparo
+    with _lock_rate_limit:
+        agora = time.monotonic()
+        espera = INTERVALO_MINIMO_SEGUNDOS - (agora - _ultimo_disparo)
+        if espera > 0:
+            time.sleep(espera)
+        _ultimo_disparo = time.monotonic()
+
+
 # Codigos/paravras que sinalizam possivel bloqueio de IP ou rate-limit,
 # em vez de erro generico de rede. Usado so para classificar e alertar,
 # nao para tentar contornar.
@@ -143,6 +164,7 @@ def autorizar_facta(client: httpx.Client, cpf: str, dados: DadosGerados) -> Tupl
         "ip": dados.ip,
     }
     try:
+        _aguardar_rate_limit()
         resp = client.post(URL_AUTORIZAR, headers=headers, data=body, timeout=30)
         resp.raise_for_status()
         return resp.json(), None
@@ -161,6 +183,7 @@ def simular_uuid(client: httpx.Client, uuid: str) -> Tuple[Optional[dict], Optio
     }
     body = {"uuid": uuid}
     try:
+        _aguardar_rate_limit()
         resp = client.post(URL_SIMULAR, headers=headers, data=body, timeout=30)
         resp.raise_for_status()
         return resp.json(), None
