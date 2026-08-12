@@ -161,6 +161,55 @@ async def ultimas_requisicoes(limite: int = 50, equipe: str | None = None):
     return database.ultimas_requisicoes(limite, equipe)
 
 
+@app.get("/admin/diagnostico-facta")
+async def diagnostico_facta():
+    """
+    Testa uma unica chamada direta ao endpoint da Facta (sem fila, sem retry)
+    e devolve status code + headers relevantes na hora. Serve para confirmar
+    rapidamente se o IP dessa VPS especifica esta sendo bloqueado pelo
+    Cloudflare da Facta, sem esperar timeout do fluxo completo.
+    """
+    import httpx as _httpx
+    import time as _time
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Accept": "application/json",
+        "Origin": "https://autocontratacao.factafinanceira.com.br",
+        "Referer": "https://autocontratacao.factafinanceira.com.br/",
+    }
+    body = {
+        "nome": "Teste Diagnostico",
+        "cpf": "00000000000",
+        "celular": "5199999999",
+        "email": "teste.diagnostico@gmail.com",
+        "termos": "S",
+        "ip": "189.45.67.88",
+    }
+
+    inicio = _time.monotonic()
+    try:
+        async with _httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://api-autocontratacao.factafinanceira.com.br/clt/analisa-cliente",
+                headers=headers,
+                data=body,
+            )
+        duracao = round(_time.monotonic() - inicio, 2)
+        eh_challenge_cloudflare = "Just a moment" in resp.text[:500]
+        return {
+            "status_code": resp.status_code,
+            "duracao_segundos": duracao,
+            "cf_ray": resp.headers.get("cf-ray"),
+            "server": resp.headers.get("server"),
+            "eh_challenge_cloudflare": eh_challenge_cloudflare,
+            "primeiros_300_chars": resp.text[:300],
+        }
+    except Exception as e:
+        duracao = round(_time.monotonic() - inicio, 2)
+        return {"erro": True, "duracao_segundos": duracao, "mensagem": str(e)}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "fila": fila_global.tamanho_fila(), "concorrencia": fila_global.concorrencia_atual()}
