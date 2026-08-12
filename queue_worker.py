@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import uuid as uuid_lib
 from typing import Optional
 
@@ -7,6 +8,12 @@ import database
 from facta_clt import simular_clt
 
 logger = logging.getLogger("queue_worker")
+
+# Se detectar bloqueios consecutivos vindos da Facta (429/cooldown), a fila
+# inteira pausa por esse tempo antes de tentar de novo, em vez de continuar
+# batendo durante o cooldown (o que so prolonga/piora a situacao).
+BLOQUEIOS_CONSECUTIVOS_PARA_PAUSAR = 3
+PAUSA_COOLDOWN_SEGUNDOS = 600  # 10 minutos
 
 
 class Job:
@@ -34,6 +41,8 @@ class FilaSimulacao:
         self._workers: list[asyncio.Task] = []
         self._concorrencia_atual = 0
         self._lock = asyncio.Lock()
+        self._bloqueios_consecutivos = 0
+        self._pausado_ate: float = 0.0  # timestamp monotonic; 0 = nao pausado
 
     async def iniciar(self):
         concorrencia = int(database.get_config("concorrencia", "5"))
@@ -88,11 +97,29 @@ class FilaSimulacao:
     def get_job(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)
 
+    def pausado(self) -> tuple[bool, float]:
+        """Retorna (esta_pausado, segundos_restantes)."""
+        restante = self._pausado_ate - time.monotonic()
+        if restante > 0:
+            return True, round(restante, 1)
+        return False, 0.0
+
     async def _worker(self, worker_num: int):
         logger.info(f"Worker {worker_num} iniciado")
         try:
             while True:
                 job = await self._fila.get()
+
+                # Se a fila estiver em cooldown (varios bloqueios seguidos),
+                # espera passar antes de processar o proximo - evita insistir
+                # durante o periodo que a Facta esta limitando.
+                esta_pausado, restante = self.pausado()
+                if esta_pausado:
+                    logger.warning(
+                        f"Fila em cooldown por bloqueio da Facta - aguardando {restante}s antes de continuar"
+                    )
+                    await asyncio.sleep(restante)
+
                 job.status = "processando"
                 try:
                     resultado = await asyncio.to_thread(
@@ -101,6 +128,7 @@ class FilaSimulacao:
                     job.resultado = resultado
                     if resultado["status"] == "ok":
                         job.status = "sucesso"
+                        self._bloqueios_consecutivos = 0
                         database.finalizar_requisicao(
                             job.req_id,
                             status="autorizado",
@@ -122,10 +150,20 @@ class FilaSimulacao:
                             chamadas_realizadas=resultado.get("chamadas_realizadas"),
                         )
                         if tipo_erro == "bloqueio_suspeito":
+                            self._bloqueios_consecutivos += 1
                             logger.warning(
-                                f"POSSIVEL BLOQUEIO detectado para cpf={job.cpf}: "
+                                f"POSSIVEL BLOQUEIO detectado para cpf={job.cpf} "
+                                f"({self._bloqueios_consecutivos} consecutivos): "
                                 f"{resultado.get('detalhe_erro')}"
                             )
+                            if self._bloqueios_consecutivos >= BLOQUEIOS_CONSECUTIVOS_PARA_PAUSAR:
+                                self._pausado_ate = time.monotonic() + PAUSA_COOLDOWN_SEGUNDOS
+                                logger.warning(
+                                    f"{self._bloqueios_consecutivos} bloqueios seguidos - "
+                                    f"pausando fila por {PAUSA_COOLDOWN_SEGUNDOS}s"
+                                )
+                        else:
+                            self._bloqueios_consecutivos = 0
                 except Exception as e:
                     job.status = "falha"
                     job.resultado = {"status": "erro_interno", "mensagem": str(e)}
