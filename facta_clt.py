@@ -68,10 +68,7 @@ def get_random_ip() -> str:
 
 
 def format_phone(ddd: str, tel: str) -> str:
-    # Sem formatacao (sem parenteses/espaco/traco) - mesmo padrao usado
-    # no projeto apps_automacao que roda no EasyPanel, para eliminar essa
-    # variavel na comparacao entre ambientes.
-    return f"{ddd}{tel}"
+    return f"({ddd}) {tel[:5]}-{tel[5:]}"
 
 
 @dataclass
