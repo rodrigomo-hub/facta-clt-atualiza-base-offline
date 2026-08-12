@@ -41,6 +41,12 @@
     background: #1a1d24; border: 1px solid #2a2d35; color: #fff;
     padding: 6px 10px; border-radius: 6px; width: 80px;
   }
+  input[type=text], input[type=password] {
+    background: #1a1d24; border: 1px solid #2a2d35; color: #fff;
+    padding: 6px 10px; border-radius: 6px;
+  }
+  .proxy-on { color: #4ade80; }
+  .proxy-off { color: #999; }
   button {
     background: #3b82f6; color: white; border: none; padding: 7px 14px;
     border-radius: 6px; cursor: pointer; font-size: 13px;
@@ -54,6 +60,7 @@
   .badge-na_fila { background: #374151; color: #9ca3af; }
   .badge-erro_interno { background: #7f1d1d; color: #f87171; }
   .badge-sem_retorno { background: #713f12; color: #fbbf24; }
+  .badge-erro_proxy { background: #78350f; color: #fdba74; }
   .key-box {
     background: #1a1d24; border: 1px solid #2a2d35; border-radius: 8px;
     padding: 10px 12px; font-family: monospace; font-size: 13px;
@@ -91,6 +98,24 @@
       <input type="number" id="concorrenciaInput" min="1" max="50">
       <button onclick="salvarConcorrencia()">Salvar</button>
       <span id="filaAtual" style="color:#999; font-size:12px;"></span>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Proxy residencial</div>
+    <div id="proxyStatus" style="margin-bottom:10px; font-size:13px;"></div>
+    <div class="config-row" style="flex-wrap:wrap; margin-bottom:8px;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+        <input type="checkbox" id="proxyLigadoInput" style="width:16px; height:16px;">
+        Usar proxy
+      </label>
+    </div>
+    <div class="config-row" style="flex-wrap:wrap; gap:8px;">
+      <input type="text" id="proxyHostInput" placeholder="host (ex: res.proxy-seller.com)" style="width:220px;">
+      <input type="text" id="proxyPortInput" placeholder="porta" style="width:80px;">
+      <input type="text" id="proxyUserInput" placeholder="usuário" style="width:160px;">
+      <input type="password" id="proxyPassInput" placeholder="senha (deixe vazio p/ manter)" style="width:220px;">
+      <button onclick="salvarProxy()">Salvar</button>
     </div>
   </section>
 
@@ -224,8 +249,47 @@ async function salvarConcorrencia() {
   carregar();
 }
 
+async function carregarProxy() {
+  const cfg = await fetch('/admin/config/proxy').then(r => r.json());
+  document.getElementById('proxyLigadoInput').checked = cfg.usar_proxy;
+  document.getElementById('proxyHostInput').value = cfg.proxy_host || '';
+  document.getElementById('proxyPortInput').value = cfg.proxy_port || '';
+  document.getElementById('proxyUserInput').value = cfg.proxy_user || '';
+  document.getElementById('proxyPassInput').value = '';
+
+  const statusDiv = document.getElementById('proxyStatus');
+  if (cfg.usar_proxy) {
+    statusDiv.innerHTML = `<span class="proxy-on">● Proxy ligado</span> — ${cfg.proxy_host}:${cfg.proxy_port}` +
+      (cfg.proxy_pass_configurada ? '' : ' <span class="proxy-off">(senha não configurada!)</span>');
+  } else {
+    statusDiv.innerHTML = '<span class="proxy-off">○ Proxy desligado (chamadas diretas)</span>';
+  }
+}
+
+async function salvarProxy() {
+  const payload = {
+    usar_proxy: document.getElementById('proxyLigadoInput').checked,
+    proxy_host: document.getElementById('proxyHostInput').value.trim(),
+    proxy_port: document.getElementById('proxyPortInput').value.trim(),
+    proxy_user: document.getElementById('proxyUserInput').value.trim(),
+  };
+  const senha = document.getElementById('proxyPassInput').value;
+  if (senha) {
+    // So envia a senha se o campo foi preenchido - deixar vazio mantem a
+    // senha ja salva no banco (evita apagar sem querer ao so mudar host/porta).
+    payload.proxy_pass = senha;
+  }
+  await fetch('/admin/config/proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  carregarProxy();
+}
+
 carregar();
 carregarEquipes();
+carregarProxy();
 setInterval(carregar, 5000);
 </script>
 </body>
