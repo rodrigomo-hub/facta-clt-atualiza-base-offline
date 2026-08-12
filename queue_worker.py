@@ -117,6 +117,8 @@ class FilaSimulacao:
                             tentativas=resultado.get("tentativa"),
                             resultado_resumo={"uuid": resultado.get("uuid")},
                             chamadas_realizadas=resultado.get("chamadas_realizadas"),
+                            usou_proxy=resultado.get("usou_proxy", False),
+                            caiu_para_direto=resultado.get("caiu_para_direto", False),
                         )
                     else:
                         job.status = "falha"
@@ -127,6 +129,8 @@ class FilaSimulacao:
                             status_final = "rate_limit"
                         elif tipo_erro == "sem_retorno":
                             status_final = "sem_retorno"
+                        elif tipo_erro == "erro_proxy":
+                            status_final = "erro_proxy"
                         else:
                             status_final = "falha"
                         database.finalizar_requisicao(
@@ -135,6 +139,8 @@ class FilaSimulacao:
                             tipo_erro=tipo_erro,
                             detalhe_erro=resultado.get("detalhe_erro"),
                             chamadas_realizadas=resultado.get("chamadas_realizadas"),
+                            usou_proxy=resultado.get("usou_proxy", False),
+                            caiu_para_direto=resultado.get("caiu_para_direto", False),
                         )
                         if tipo_erro == "bloqueio_ip":
                             logger.warning(
@@ -144,6 +150,11 @@ class FilaSimulacao:
                         elif tipo_erro == "rate_limit":
                             logger.info(
                                 f"Rate limit (throttle esperado) para cpf={job.cpf}: "
+                                f"{resultado.get('detalhe_erro')}"
+                            )
+                        elif tipo_erro == "erro_proxy":
+                            logger.warning(
+                                f"Falha de PROXY (nao da Facta) para cpf={job.cpf}: "
                                 f"{resultado.get('detalhe_erro')}"
                             )
                 except Exception as e:

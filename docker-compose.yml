@@ -5,6 +5,17 @@ services:
     image: facta-clt-atualiza-base-offline:latest
     environment:
       - DB_PATH=/app/data/facta_clt.db
+      # Basic Auth do painel /admin/* - obrigatorio (sem ADMIN_PASS, o
+      # painel fica bloqueado por seguranca em vez de aberto).
+      - ADMIN_USER=admin
+      - ADMIN_PASS=troque_esta_senha
+      # Proxy residencial (opcional) - deixar USAR_PROXY=false para voltar
+      # ao comportamento antigo (chamada direta, sem proxy).
+      - FACTA_USAR_PROXY=false
+      - FACTA_PROXY_HOST=res.proxy-seller.com
+      - FACTA_PROXY_PORT=10000
+      - FACTA_PROXY_USER=
+      - FACTA_PROXY_PASS=
     volumes:
       - facta_clt_data:/app/data
     networks:

@@ -63,6 +63,10 @@ def init_db():
         colunas = [r["name"] for r in conn.execute("PRAGMA table_info(requisicoes)").fetchall()]
         if "chamadas_realizadas" not in colunas:
             conn.execute("ALTER TABLE requisicoes ADD COLUMN chamadas_realizadas INTEGER")
+        if "usou_proxy" not in colunas:
+            conn.execute("ALTER TABLE requisicoes ADD COLUMN usou_proxy INTEGER NOT NULL DEFAULT 0")
+        if "caiu_para_direto" not in colunas:
+            conn.execute("ALTER TABLE requisicoes ADD COLUMN caiu_para_direto INTEGER NOT NULL DEFAULT 0")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS config (
                 chave TEXT PRIMARY KEY,
@@ -71,6 +75,14 @@ def init_db():
         """)
         conn.execute(
             "INSERT OR IGNORE INTO config (chave, valor) VALUES ('concorrencia', '5')"
+        )
+        # Config de proxy - valores default vazios/desligado. Se existirem
+        # env vars FACTA_* no primeiro boot, elas sao usadas soh como
+        # fallback em tempo de leitura (ver facta_clt.get_proxy_config),
+        # nao sao copiadas pro banco automaticamente - editar via
+        # /admin/config/proxy e a forma oficial de configurar.
+        conn.execute(
+            "INSERT OR IGNORE INTO config (chave, valor) VALUES ('usar_proxy', 'false')"
         )
 
 
@@ -87,6 +99,63 @@ def set_config(chave: str, valor: str):
             "ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
             (chave, valor),
         )
+
+
+# ------------------------------------------------------------------
+# Config de proxy - chaves dedicadas na mesma tabela `config`, editaveis
+# via /admin/config/proxy sem precisar de redeploy. A senha fica salva
+# no banco (mesmo padrao ja usado para api_key das equipes), mas
+# get_proxy_config_publico() nunca a devolve - so get_proxy_config()
+# (uso interno do facta_clt.py) tem acesso a ela.
+# ------------------------------------------------------------------
+
+_CHAVES_PROXY = ("usar_proxy", "proxy_host", "proxy_port", "proxy_user", "proxy_pass")
+
+
+def get_proxy_config() -> dict:
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT chave, valor FROM config WHERE chave IN ({','.join('?' * len(_CHAVES_PROXY))})",
+            _CHAVES_PROXY,
+        ).fetchall()
+        cfg = {r["chave"]: r["valor"] for r in rows}
+        return {
+            "usar_proxy": cfg.get("usar_proxy", "false").lower() in ("1", "true", "yes"),
+            "proxy_host": cfg.get("proxy_host", ""),
+            "proxy_port": cfg.get("proxy_port", ""),
+            "proxy_user": cfg.get("proxy_user", ""),
+            "proxy_pass": cfg.get("proxy_pass", ""),
+        }
+
+
+def get_proxy_config_publico() -> dict:
+    cfg = get_proxy_config()
+    return {
+        "usar_proxy": cfg["usar_proxy"],
+        "proxy_host": cfg["proxy_host"],
+        "proxy_port": cfg["proxy_port"],
+        "proxy_user": cfg["proxy_user"],
+        "proxy_pass_configurada": bool(cfg["proxy_pass"]),
+    }
+
+
+def set_proxy_config(
+    usar_proxy: Optional[bool] = None,
+    proxy_host: Optional[str] = None,
+    proxy_port: Optional[str] = None,
+    proxy_user: Optional[str] = None,
+    proxy_pass: Optional[str] = None,
+):
+    if usar_proxy is not None:
+        set_config("usar_proxy", "true" if usar_proxy else "false")
+    if proxy_host is not None:
+        set_config("proxy_host", proxy_host)
+    if proxy_port is not None:
+        set_config("proxy_port", str(proxy_port))
+    if proxy_user is not None:
+        set_config("proxy_user", proxy_user)
+    if proxy_pass is not None:
+        set_config("proxy_pass", proxy_pass)
 
 
 def get_equipe(api_key: str) -> Optional[dict]:
@@ -136,11 +205,14 @@ def finalizar_requisicao(
     detalhe_erro: Optional[str] = None,
     resultado_resumo: Optional[dict] = None,
     chamadas_realizadas: Optional[int] = None,
+    usou_proxy: bool = False,
+    caiu_para_direto: bool = False,
 ):
     with get_conn() as conn:
         conn.execute(
             "UPDATE requisicoes SET status=?, tentativas=?, tipo_erro=?, detalhe_erro=?, "
-            "finalizado_em=?, resultado_resumo=?, chamadas_realizadas=? WHERE id=?",
+            "finalizado_em=?, resultado_resumo=?, chamadas_realizadas=?, usou_proxy=?, "
+            "caiu_para_direto=? WHERE id=?",
             (
                 status,
                 tentativas,
@@ -149,6 +221,8 @@ def finalizar_requisicao(
                 datetime.utcnow().isoformat(),
                 json.dumps(resultado_resumo, ensure_ascii=False) if resultado_resumo else None,
                 chamadas_realizadas,
+                int(usou_proxy),
+                int(caiu_para_direto),
                 req_id,
             ),
         )

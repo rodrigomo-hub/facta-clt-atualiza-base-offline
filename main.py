@@ -1,10 +1,13 @@
 import asyncio
 import logging
+import os
 import re
 import secrets
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -36,6 +39,40 @@ async def get_equipe_atual(x_team_key: str = Header(..., alias="X-Team-Key")) ->
 
 
 # ============================================================
+# AUTH DO PAINEL ADMIN (Basic Auth)
+# ------------------------------------------------------------
+# Protege todas as rotas /admin/* - antes estava completamente
+# aberto na rede, qualquer um com a URL conseguia criar equipes,
+# ver historico de requisicoes e mudar config (incluindo credenciais
+# de proxy). Usuario/senha vem de env var, comparado com
+# secrets.compare_digest para evitar timing attack.
+# ============================================================
+
+_security = HTTPBasic()
+ADMIN_USER = os.getenv("ADMIN_USER", "admin")
+ADMIN_PASS = os.getenv("ADMIN_PASS", "")
+
+
+async def exigir_admin(credentials: HTTPBasicCredentials = Depends(_security)):
+    if not ADMIN_PASS:
+        # Falha segura: se ninguem configurou ADMIN_PASS, bloqueia tudo em
+        # vez de deixar aberto sem querer.
+        raise HTTPException(
+            status_code=503,
+            detail="ADMIN_PASS nao configurado no ambiente - painel admin bloqueado por seguranca.",
+        )
+    usuario_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
+    senha_ok = secrets.compare_digest(credentials.password, ADMIN_PASS)
+    if not (usuario_ok and senha_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciais invalidas",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return True
+
+
+# ============================================================
 # MODELOS
 # ============================================================
 
@@ -63,6 +100,14 @@ class PrioridadeEquipeRequest(BaseModel):
 
 class ConcorrenciaRequest(BaseModel):
     concorrencia: int = Field(..., ge=1, le=50)
+
+
+class ProxyConfigRequest(BaseModel):
+    usar_proxy: Optional[bool] = None
+    proxy_host: Optional[str] = None
+    proxy_port: Optional[str] = None
+    proxy_user: Optional[str] = None
+    proxy_pass: Optional[str] = None
 
 
 # ============================================================
@@ -130,19 +175,19 @@ async def simular_facta_clt_aguardar(
 # ============================================================
 
 @app.post("/admin/equipes")
-async def criar_equipe(payload: NovaEquipeRequest):
+async def criar_equipe(payload: NovaEquipeRequest, _admin: bool = Depends(exigir_admin)):
     api_key = secrets.token_hex(16)
     database.criar_equipe(api_key, payload.nome)
     return {"nome": payload.nome, "api_key": api_key}
 
 
 @app.get("/admin/equipes")
-async def listar_equipes():
+async def listar_equipes(_admin: bool = Depends(exigir_admin)):
     return database.listar_equipes()
 
 
 @app.post("/admin/equipes/prioridade")
-async def set_prioridade_equipe(payload: PrioridadeEquipeRequest):
+async def set_prioridade_equipe(payload: PrioridadeEquipeRequest, _admin: bool = Depends(exigir_admin)):
     equipe = database.get_equipe(payload.api_key)
     if not equipe:
         raise HTTPException(status_code=404, detail="Equipe nao encontrada")
@@ -155,7 +200,7 @@ async def set_prioridade_equipe(payload: PrioridadeEquipeRequest):
 # ============================================================
 
 @app.get("/admin/config")
-async def get_config():
+async def get_config(_admin: bool = Depends(exigir_admin)):
     return {
         "concorrencia": fila_global.concorrencia_atual(),
         "tamanho_fila_atual": fila_global.tamanho_fila(),
@@ -163,9 +208,33 @@ async def get_config():
 
 
 @app.post("/admin/config/concorrencia")
-async def set_concorrencia(payload: ConcorrenciaRequest):
+async def set_concorrencia(payload: ConcorrenciaRequest, _admin: bool = Depends(exigir_admin)):
     novo_valor = await fila_global.atualizar_concorrencia(payload.concorrencia)
     return {"concorrencia": novo_valor}
+
+
+# ============================================================
+# ENDPOINTS - CONFIG (proxy residencial)
+# ------------------------------------------------------------
+# Configuravel via painel/API sem precisar de redeploy. GET nunca
+# devolve a senha em texto - so confirma se esta configurada ou nao.
+# ============================================================
+
+@app.get("/admin/config/proxy")
+async def get_config_proxy(_admin: bool = Depends(exigir_admin)):
+    return database.get_proxy_config_publico()
+
+
+@app.post("/admin/config/proxy")
+async def set_config_proxy(payload: ProxyConfigRequest, _admin: bool = Depends(exigir_admin)):
+    database.set_proxy_config(
+        usar_proxy=payload.usar_proxy,
+        proxy_host=payload.proxy_host,
+        proxy_port=payload.proxy_port,
+        proxy_user=payload.proxy_user,
+        proxy_pass=payload.proxy_pass,
+    )
+    return database.get_proxy_config_publico()
 
 
 # ============================================================
@@ -173,12 +242,12 @@ async def set_concorrencia(payload: ConcorrenciaRequest):
 # ============================================================
 
 @app.get("/admin/stats/hoje")
-async def stats_hoje(equipe: str | None = None):
+async def stats_hoje(equipe: str | None = None, _admin: bool = Depends(exigir_admin)):
     return database.stats_hoje(equipe)
 
 
 @app.get("/admin/capacidade")
-async def capacidade():
+async def capacidade(_admin: bool = Depends(exigir_admin)):
     """
     Calcula throughput teorico (baseado no rate limiter atual) vs uso real
     de hoje, e projeta quanto tempo levaria para processar um volume diario
@@ -211,17 +280,18 @@ async def capacidade():
 
 
 @app.get("/admin/requisicoes")
-async def ultimas_requisicoes(limite: int = 50, equipe: str | None = None):
+async def ultimas_requisicoes(limite: int = 50, equipe: str | None = None, _admin: bool = Depends(exigir_admin)):
     return database.ultimas_requisicoes(limite, equipe)
 
 
 @app.get("/admin/diagnostico-facta")
-async def diagnostico_facta():
+async def diagnostico_facta(via_proxy: bool = False, _admin: bool = Depends(exigir_admin)):
     """
     Testa uma unica chamada direta ao endpoint da Facta (sem fila, sem retry)
     e devolve status code + headers relevantes na hora. Serve para confirmar
-    rapidamente se o IP dessa VPS especifica esta sendo bloqueado pelo
-    Cloudflare da Facta, sem esperar timeout do fluxo completo.
+    rapidamente se o IP dessa VPS especifica (ou do proxy, se via_proxy=true)
+    esta sendo bloqueado pelo Cloudflare da Facta, sem esperar timeout do
+    fluxo completo.
     """
     import httpx as _httpx
     import time as _time
@@ -241,9 +311,21 @@ async def diagnostico_facta():
         "ip": "189.45.67.88",
     }
 
+    proxy_url = None
+    if via_proxy:
+        import facta_clt
+
+        proxy_url = facta_clt._montar_proxy_url()
+        if not proxy_url:
+            return {
+                "erro": True,
+                "mensagem": "via_proxy=true mas o proxy nao esta configurado/ligado "
+                "(confira /admin/config/proxy)",
+            }
+
     inicio = _time.monotonic()
     try:
-        async with _httpx.AsyncClient(timeout=15) as client:
+        async with _httpx.AsyncClient(timeout=15, proxy=proxy_url) as client:
             resp = await client.post(
                 "https://api-autocontratacao.factafinanceira.com.br/clt/analisa-cliente",
                 headers=headers,
@@ -252,6 +334,7 @@ async def diagnostico_facta():
         duracao = round(_time.monotonic() - inicio, 2)
         eh_challenge_cloudflare = "Just a moment" in resp.text[:500]
         return {
+            "via_proxy": via_proxy,
             "status_code": resp.status_code,
             "duracao_segundos": duracao,
             "cf_ray": resp.headers.get("cf-ray"),
@@ -261,7 +344,7 @@ async def diagnostico_facta():
         }
     except Exception as e:
         duracao = round(_time.monotonic() - inicio, 2)
-        return {"erro": True, "duracao_segundos": duracao, "mensagem": str(e)}
+        return {"erro": True, "via_proxy": via_proxy, "duracao_segundos": duracao, "mensagem": str(e)}
 
 
 @app.get("/health")
@@ -277,5 +360,5 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
-async def dashboard():
+async def dashboard(_admin: bool = Depends(exigir_admin)):
     return FileResponse("static/index.html")
