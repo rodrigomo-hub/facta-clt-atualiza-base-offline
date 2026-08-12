@@ -165,7 +165,7 @@ def autorizar_facta(client: httpx.Client, cpf: str, dados: DadosGerados) -> Tupl
     }
     try:
         _aguardar_rate_limit()
-        resp = client.post(URL_AUTORIZAR, headers=headers, data=body, timeout=30)
+        resp = client.post(URL_AUTORIZAR, headers=headers, data=body, timeout=None)
         resp.raise_for_status()
         return resp.json(), None
     except Exception as e:
@@ -184,7 +184,7 @@ def simular_uuid(client: httpx.Client, uuid: str) -> Tuple[Optional[dict], Optio
     body = {"uuid": uuid}
     try:
         _aguardar_rate_limit()
-        resp = client.post(URL_SIMULAR, headers=headers, data=body, timeout=30)
+        resp = client.post(URL_SIMULAR, headers=headers, data=body, timeout=None)
         resp.raise_for_status()
         return resp.json(), None
     except Exception as e:
