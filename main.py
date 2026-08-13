@@ -99,7 +99,12 @@ class PrioridadeEquipeRequest(BaseModel):
 
 
 class ConcorrenciaRequest(BaseModel):
-    concorrencia: int = Field(..., ge=1, le=50)
+    # Teto original era 50 - com proxy residencial ligado, cada chamada
+    # individual fica bem mais lenta (~1.9s vs ~0.2s direto), entao o
+    # gargalo passa a ser latencia de rede por worker, nao mais rate
+    # limit. Subir o teto de workers compensa essa latencia mantendo
+    # throughput agregado alto.
+    concorrencia: int = Field(..., ge=1, le=150)
 
 
 class ProxyConfigRequest(BaseModel):

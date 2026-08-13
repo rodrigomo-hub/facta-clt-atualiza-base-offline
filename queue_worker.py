@@ -61,7 +61,10 @@ class FilaSimulacao:
             self._concorrencia_atual = novo_total
 
     async def atualizar_concorrencia(self, novo_total: int):
-        novo_total = max(1, min(novo_total, 50))
+        # Teto alinhado com o limite validado em main.py (ConcorrenciaRequest,
+        # le=150) - antes esse cap interno de 50 sobrescrevia silenciosamente
+        # qualquer valor maior enviado pelo painel/API.
+        novo_total = max(1, min(novo_total, 150))
         database.set_config("concorrencia", str(novo_total))
         await self._ajustar_workers(novo_total)
         return novo_total
