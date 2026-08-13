@@ -104,6 +104,7 @@ class FilaSimulacao:
             while True:
                 _prioridade_invertida, _seq, job = await self._fila.get()
                 job.status = "processando"
+                database.marcar_processando(job.req_id)
                 try:
                     resultado = await asyncio.to_thread(
                         simular_clt, job.cpf, job.tentativas

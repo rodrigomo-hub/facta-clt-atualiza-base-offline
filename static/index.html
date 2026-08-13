@@ -58,6 +58,7 @@
   .badge-bloqueio_ip { background: #7f1d1d; color: #f87171; }
   .badge-rate_limit { background: #713f12; color: #fbbf24; }
   .badge-na_fila { background: #374151; color: #9ca3af; }
+  .badge-processando { background: #1e3a5f; color: #60a5fa; }
   .badge-erro_interno { background: #7f1d1d; color: #f87171; }
   .badge-sem_retorno { background: #713f12; color: #fbbf24; }
   .badge-erro_proxy { background: #78350f; color: #fdba74; }
@@ -122,7 +123,7 @@
   <section>
     <div class="section-title">Por equipe (hoje)</div>
     <table id="tabelaEquipes">
-      <thead><tr><th>Equipe</th><th>Autorizado</th><th>Falha</th><th>Sem retorno</th><th>Rate limit</th><th>Bloqueio IP</th><th>Na fila</th><th>Total</th></tr></thead>
+      <thead><tr><th>Equipe</th><th>Autorizado</th><th>Falha</th><th>Sem retorno</th><th>Rate limit</th><th>Bloqueio IP</th><th>Na fila</th><th>Processando</th><th>Total</th></tr></thead>
       <tbody></tbody>
     </table>
   </section>
@@ -151,6 +152,7 @@ async function carregar() {
     <div class="card"><div class="num warn">${ps.rate_limit || 0}</div><div class="label">Rate limit (espaçamento)</div></div>
     <div class="card"><div class="num err">${ps.bloqueio_ip || 0}</div><div class="label">Bloqueio de IP</div></div>
     <div class="card"><div class="num">${ps.na_fila || 0}</div><div class="label">Na fila</div></div>
+    <div class="card"><div class="num" style="color:#60a5fa;">${ps.processando || 0}</div><div class="label">Processando</div></div>
   `;
 
   document.getElementById('concorrenciaInput').value = config.concorrencia;
@@ -168,6 +170,7 @@ async function carregar() {
       <td>${statusMap.rate_limit || 0}</td>
       <td>${statusMap.bloqueio_ip || 0}</td>
       <td>${statusMap.na_fila || 0}</td>
+      <td>${statusMap.processando || 0}</td>
       <td>${total}</td>
     </tr>`;
   }

@@ -220,6 +220,19 @@ def registrar_requisicao_criada(equipe: str, cpf: str, job_id: str) -> int:
         return cur.lastrowid
 
 
+def marcar_processando(req_id: int):
+    """
+    Atualiza o status no banco quando um worker pega o job da fila para
+    processar de fato - sem isso, o dashboard mostrava 'na_fila' para
+    jobs que ja estavam sendo processados havia tempo, ja que o banco so
+    era atualizado no final (finalizar_requisicao).
+    """
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE requisicoes SET status = 'processando' WHERE id = ?", (req_id,)
+        )
+
+
 def finalizar_requisicao(
     req_id: int,
     status: str,
