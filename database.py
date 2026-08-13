@@ -2,11 +2,34 @@ import os
 import sqlite3
 import threading
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 from typing import Optional
 
 DB_PATH = os.getenv("DB_PATH", "facta_clt.db")
+
+# Todos os timestamps (criado_em, finalizado_em) sao salvos em UTC
+# (datetime.utcnow()), mas o "dia" que importa pro dashboard e o dia no
+# horario de Brasilia, nao em UTC - sem isso, as estatisticas de "hoje"
+# zeravam as 21h (horario de Brasilia = meia-noite UTC), mesmo ainda
+# sendo o mesmo dia aqui.
+FUSO_BR = ZoneInfo("America/Sao_Paulo")
+
+
+def _limites_dia_br_em_utc(dia: Optional[date] = None) -> tuple[str, str]:
+    """
+    Retorna (inicio_utc_iso, fim_utc_iso) correspondentes ao dia completo
+    (00:00 a 23:59:59) no horario de Brasilia, convertido para UTC - usado
+    para filtrar criado_em (que esta em UTC) corretamente por "dia local".
+    """
+    if dia is None:
+        dia = datetime.now(FUSO_BR).date()
+    inicio_br = datetime(dia.year, dia.month, dia.day, 0, 0, 0, tzinfo=FUSO_BR)
+    fim_br = inicio_br + timedelta(days=1)
+    inicio_utc = inicio_br.astimezone(ZoneInfo("UTC")).replace(tzinfo=None).isoformat()
+    fim_utc = fim_br.astimezone(ZoneInfo("UTC")).replace(tzinfo=None).isoformat()
+    return inicio_utc, fim_utc
 
 _lock = threading.Lock()
 
@@ -235,10 +258,11 @@ def get_requisicao(req_id: int) -> Optional[dict]:
 
 
 def stats_hoje(equipe: Optional[str] = None) -> dict:
-    hoje = date.today().isoformat()
+    hoje = datetime.now(FUSO_BR).date().isoformat()
+    inicio_utc, fim_utc = _limites_dia_br_em_utc()
     with get_conn() as conn:
-        query = "SELECT status, COUNT(*) as qtd FROM requisicoes WHERE date(criado_em) = ?"
-        params: list = [hoje]
+        query = "SELECT status, COUNT(*) as qtd FROM requisicoes WHERE criado_em >= ? AND criado_em < ?"
+        params: list = [inicio_utc, fim_utc]
         if equipe:
             query += " AND equipe = ?"
             params.append(equipe)
@@ -247,8 +271,8 @@ def stats_hoje(equipe: Optional[str] = None) -> dict:
 
         por_status = {r["status"]: r["qtd"] for r in rows}
 
-        query_equipe = "SELECT equipe, status, COUNT(*) as qtd FROM requisicoes WHERE date(criado_em) = ?"
-        params_e: list = [hoje]
+        query_equipe = "SELECT equipe, status, COUNT(*) as qtd FROM requisicoes WHERE criado_em >= ? AND criado_em < ?"
+        params_e: list = [inicio_utc, fim_utc]
         if equipe:
             query_equipe += " AND equipe = ?"
             params_e.append(equipe)
@@ -273,15 +297,17 @@ def stats_capacidade_hoje() -> dict:
     """
     Agrega chamadas HTTP reais feitas hoje (nao jobs, chamadas de fato) para
     calcular throughput real vs capacidade teorica do rate limiter.
+    "Hoje" e calculado no horario de Brasilia (ver _limites_dia_br_em_utc),
+    nao em UTC puro.
     """
-    hoje = date.today().isoformat()
+    inicio_utc, fim_utc = _limites_dia_br_em_utc()
     with get_conn() as conn:
         row = conn.execute(
             "SELECT COUNT(*) as total_jobs, "
             "SUM(COALESCE(chamadas_realizadas, 0)) as total_chamadas, "
             "AVG(chamadas_realizadas) as media_chamadas_por_job "
-            "FROM requisicoes WHERE date(criado_em) = ? AND chamadas_realizadas IS NOT NULL",
-            (hoje,),
+            "FROM requisicoes WHERE criado_em >= ? AND criado_em < ? AND chamadas_realizadas IS NOT NULL",
+            (inicio_utc, fim_utc),
         ).fetchone()
         return {
             "total_jobs_processados_hoje": row["total_jobs"] or 0,
