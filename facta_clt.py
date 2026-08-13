@@ -296,7 +296,12 @@ def simular_clt(cpf: str, tentativas: int = 5) -> dict:
     sem_retorno_consecutivos = 0
     usou_proxy_em_alguma_chamada = False
     caiu_para_direto_em_alguma_chamada = False
-    MAX_SEM_RETORNO = 2  # depois disso, para de tentar e marca como "sem_retorno"
+    # Depois de X vezes seguidas com resposta vazia, para de tentar e marca
+    # como "sem_retorno" - configuravel via env var (antes era fixo em 2).
+    # Vazio (sem_retorno) e diferente de "sem oferta" (que vem com erro
+    # estruturado tipo codigo 407, resposta rapida) - vale insistir mais
+    # nesse caso, ja que pode ser instabilidade pontual (proxy, timing).
+    MAX_SEM_RETORNO = int(os.getenv("FACTA_MAX_SEM_RETORNO", "2"))
 
     def _chamar_com_fallback(fn, *args):
         """

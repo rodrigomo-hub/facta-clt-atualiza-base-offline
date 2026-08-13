@@ -19,6 +19,11 @@ services:
       - FACTA_PROXY_PORT=${FACTA_PROXY_PORT:-10000}
       - FACTA_PROXY_USER=${FACTA_PROXY_USER:-}
       - FACTA_PROXY_PASS=${FACTA_PROXY_PASS:-}
+      # Quantas respostas vazias seguidas ("sem_retorno") ate desistir do
+      # CPF, mesmo com tentativas sobrando. Default original era 2 (fixo
+      # no codigo); 5 = usa todas as tentativas normalmente antes de
+      # desistir (nao para antecipado so por vir vazio).
+      - FACTA_MAX_SEM_RETORNO=5
     volumes:
       - facta_clt_data:/app/data
     networks:
