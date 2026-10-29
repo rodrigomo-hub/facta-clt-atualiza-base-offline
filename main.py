@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 
 import database
 import proxy_saldo
-from queue_worker import fila_global, validar_url_webhook
+from queue_worker import fila_global, validar_url_webhook, MAX_CONCORRENCIA
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("main")
@@ -136,7 +136,7 @@ class ConcorrenciaRequest(BaseModel):
     # gargalo passa a ser latencia de rede por worker, nao mais rate
     # limit. Subir o teto de workers compensa essa latencia mantendo
     # throughput agregado alto.
-    concorrencia: int = Field(..., ge=1, le=150)
+    concorrencia: int = Field(..., ge=1, le=MAX_CONCORRENCIA)
 
 
 class SaldoProxyConfigRequest(BaseModel):

@@ -24,6 +24,7 @@ SEGUNDOS_JOB_FINALIZADO_EM_MEMORIA = 600
 
 PERMITIR_REDE_PRIVADA = os.getenv("WEBHOOK_PERMITIR_REDE_PRIVADA", "false").lower() in ("1", "true", "yes")
 WEBHOOK_TIMEOUT_SEGUNDOS = float(os.getenv("WEBHOOK_TIMEOUT_SEGUNDOS", "60"))
+MAX_CONCORRENCIA = int(os.getenv("MAX_CONCORRENCIA", "500"))
 STATUS_RETRY_WEBHOOK = {408, 425, 429, 502, 503, 504}
 
 
@@ -204,7 +205,7 @@ class FilaSimulacao:
         # Teto alinhado com o limite validado em main.py (ConcorrenciaRequest,
         # le=150) - antes esse cap interno de 50 sobrescrevia silenciosamente
         # qualquer valor maior enviado pelo painel/API.
-        novo_total = max(1, min(novo_total, 150))
+        novo_total = max(1, min(novo_total, MAX_CONCORRENCIA))
         database.set_config("concorrencia", str(novo_total))
         await self._ajustar_workers(novo_total)
         return novo_total
