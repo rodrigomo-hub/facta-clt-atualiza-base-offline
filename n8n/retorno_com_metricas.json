@@ -1,0 +1,1365 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "retorno",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -4768,
+        208
+      ],
+      "id": "0b566ef9-36e0-48b6-a0f7-50ae4ccea7c9",
+      "name": "Webhook",
+      "webhookId": "ee06361d-5a47-4e1b-8bad-cc95875bc09b"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "eb6b84a7-567c-4012-82e2-168cc7d888ea",
+              "name": "TOKEN FACTA",
+              "value": "=Bearer {{ $('PUXA TOKEN').item.json.TOKEN }}",
+              "type": "string"
+            },
+            {
+              "id": "c6461890-5c4c-4791-a1a5-cdcf9ee91151",
+              "name": "USUARIO FACTA",
+              "value": "={{ $('PUXA TOKEN').item.json.USUARIO }}",
+              "type": "string"
+            },
+            {
+              "id": "08cbf5b9-e328-4e75-a690-769c92d6ff56",
+              "name": "codigo_master FACTA",
+              "value": "={{ $('PUXA TOKEN').item.json.codigo_master }}",
+              "type": "string"
+            },
+            {
+              "id": "f5f11196-b765-4598-913b-47b2aa13c389",
+              "name": "Usuario_certificado",
+              "value": "={{ $('PUXA TOKEN').item.json.Usuario_certificado }}",
+              "type": "string"
+            },
+            {
+              "id": "7215833a-db80-4873-b75b-c3f281330ae0",
+              "name": "cpf",
+              "value": "={{ $('Webhook').item.json.body.cpf }}",
+              "type": "string"
+            },
+            {
+              "id": "a14ba01a-5627-4f33-a8f9-20caadc11643",
+              "name": "token_base_off_facta",
+              "value": "=Bearer {{ $json.token_base_off_facta }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4288,
+        208
+      ],
+      "id": "c5bf6131-cc4b-4d83-a92c-d2b69cb9203a",
+      "name": "DADOS PARA O FLUXO"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "RIDa6F11qso0lGdd",
+          "mode": "list",
+          "cachedResultName": "ACEESOS_GERADOR DE TOKENS",
+          "cachedResultUrl": "/projects/ssCL1rPgJfaEKPSp/datatables/RIDa6F11qso0lGdd"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "SISTEMA",
+              "keyValue": "FACTA"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -4544,
+        208
+      ],
+      "id": "29df99b3-566c-4489-8b6c-bc2b974b3f04",
+      "name": "PUXA TOKEN"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $('CLT - OFFLINE').first().json;\n\n// ======================================================\n// TRATAMENTO INICIAL\n// ======================================================\n\nif (!response) {\n  return [{\n    json: {\n      resultado: \"FALHA_API\",\n      motivo: \"sem_resposta\",\n      anotacao: \"A API não retornou resposta.\"\n    }\n  }];\n}\n\nif (response.erro === true) {\n  return [{\n    json: {\n      resultado: \"FALHA_API\",\n      motivo: \"base_offline_indisponivel\",\n      anotacao: response.mensagem || \"Base offline indisponível no momento.\"\n    }\n  }];\n}\n\nconst dados = response.dados || [];\n\nif (dados.length === 0) {\n  return [{\n    json: {\n      resultado: \"SEM_DADOS\",\n      motivo: \"sem_dados_base_offline\",\n      nome: null,\n      dataNascimento: null,\n      nomeMae: null,\n      sexo: null,\n      anotacao: \"Nenhum dado encontrado na base offline para este CPF.\"\n    }\n  }];\n}\n\n// ======================================================\n// FUNÇÕES\n// ======================================================\n\nfunction numero(valor) {\n  return parseFloat(String(valor || 0).replace(\",\", \".\")) || 0;\n}\n\nfunction calcularMeses(dataAdmissao) {\n  if (!dataAdmissao) return 0;\n  const admissao = new Date(dataAdmissao);\n  const hoje = new Date();\n  let meses = (hoje.getFullYear() - admissao.getFullYear()) * 12;\n  meses += hoje.getMonth() - admissao.getMonth();\n  return meses;\n}\n\nfunction formatarTempoVinculo(meses) {\n  if (meses <= 0) return \"0 meses\";\n  const anos = Math.floor(meses / 12);\n  const resto = meses % 12;\n  if (anos > 0 && resto > 0) return `${anos} ano${anos > 1 ? \"s\" : \"\"} e ${resto} meses`;\n  if (anos > 0) return `${anos} ano${anos > 1 ? \"s\" : \"\"}`;\n  return `${resto} meses`;\n}\n\n// ======================================================\n// DADOS GERAIS\n// ======================================================\n\nconst nomeCliente = dados[0]?.nome || \"Não informado\";\nconst cpf = dados[0]?.cpf || \"Não informado\";\nconst dataNascimento = dados[0]?.dataNascimento || null;\nconst nomeMae = dados[0]?.nomeMae || null;\nconst sexo = dados[0]?.sexo_descricao || null;\n\nconst cabecalho = `Cliente: ${nomeCliente} | CPF: ${cpf}`;\n\nconst updatedAt = dados.reduce((maisRecente, v) => {\n  if (!v.updated_at) return maisRecente;\n  return !maisRecente || new Date(v.updated_at) > new Date(maisRecente)\n    ? v.updated_at\n    : maisRecente;\n}, null);\n\nconst rodape = `\\n\\nBase atualizada em: ${updatedAt}`;\n\n// ======================================================\n// FLAGS\n// ======================================================\n\nconst possui_margem_disponivel = dados.some(v =>\n  numero(v.valorMargemDisponivel) > 50\n);\n\nconst possui_vinculo_1_ano_com_margem = dados.some(v =>\n  calcularMeses(v.dataAdmissao) >= 12 &&\n  numero(v.valorMargemDisponivel) > 50\n);\n\nconst possui_vinculo_recente_com_margem = dados.some(v =>\n  calcularMeses(v.dataAdmissao) < 3 &&\n  numero(v.valorMargemDisponivel) > 50\n);\n\nconst flags = {\n  possui_margem_disponivel,\n  possui_vinculo_1_ano_com_margem\n};\n\nconst identificacao = { nomeMae, sexo };\n\n// ======================================================\n// TODOS OS VÍNCULOS\n// ======================================================\n\nconst todosVinculos = dados.map(v => {\n  const meses = calcularMeses(v.dataAdmissao);\n  return `• Matrícula: ${v.matricula} | Margem: R$ ${numero(v.valorMargemDisponivel).toFixed(2)} | Admissão: ${v.dataAdmissao} | Tempo: ${formatarTempoVinculo(meses)}`;\n}).join('\\n');\n\n// ======================================================\n// FILTRO 3 MESES\n// ======================================================\n\nconst vinculosValidos = dados.filter(v =>\n  calcularMeses(v.dataAdmissao) >= 3\n);\n\nif (vinculosValidos.length === 0) {\n  return [{\n    json: {\n      resultado: \"NAO_APROVADO\",\n      motivo: \"sem_vinculo_3_meses\",\n      nome: nomeCliente,\n      dataNascimento,\n      ...identificacao,\n      ...flags,\n      anotacao: `${cabecalho}\\n\\nCliente não possui vínculos com tempo mínimo de 3 meses.\\n\\nTodos os vínculos encontrados:\\n${todosVinculos}${rodape}`\n    }\n  }];\n}\n\n// ======================================================\n// MARGEM\n// ======================================================\n\nconst comMargem = vinculosValidos.filter(v =>\n  numero(v.valorMargemDisponivel) > 50\n);\n\nif (comMargem.length === 0) {\n\n  if (possui_vinculo_recente_com_margem) {\n    return [{\n      json: {\n        resultado: \"NAO_APROVADO\",\n        motivo: \"vinculo_recente_com_margem\",\n        nome: nomeCliente,\n        dataNascimento,\n        ...identificacao,\n        ...flags,\n        anotacao: `${cabecalho}\\n\\nCliente possui margem disponível, porém apenas em vínculo recente com menos de 3 meses.\\n\\nTodos os vínculos encontrados:\\n${todosVinculos}${rodape}`\n      }\n    }];\n  }\n\n  return [{\n    json: {\n      resultado: \"NAO_APROVADO\",\n      motivo: \"sem_margem\",\n      nome: nomeCliente,\n      dataNascimento,\n      ...identificacao,\n      ...flags,\n      anotacao: `${cabecalho}\\n\\nCliente não possui vínculos aptos com margem acima de R$ 50,00.\\n\\nTodos os vínculos encontrados:\\n${todosVinculos}${rodape}`\n    }\n  }];\n}\n\n// ======================================================\n// ELEGIBILIDADE FACTA\n// ======================================================\n\nconst elegiveisComMargem = comMargem.filter(v =>\n  v.elegivel === \"1\"\n);\n\nif (elegiveisComMargem.length === 0) {\n\n  const maiorMargem = Math.max(\n    ...comMargem.map(v => numero(v.valorMargemDisponivel))\n  );\n\n  const detalhes = comMargem.map(v =>\n    `• Matrícula: ${v.matricula} | Margem: R$ ${numero(v.valorMargemDisponivel).toFixed(2)} | Elegível: ${v.elegivel} | Motivo: ${v.motivoInelegibilidade_descricao || \"Não informado\"}`\n  ).join('\\n');\n\n  return [{\n    json: {\n      resultado: \"NAO_APROVADO\",\n      motivo: \"nao_elegivel_facta\",\n      nome: nomeCliente,\n      dataNascimento,\n      ...identificacao,\n      ...flags,\n      anotacao: `${cabecalho}\\n\\nCliente possui margem, porém não possui vínculo elegível na Facta.\\n\\nVínculos analisados:\\n${detalhes}\\n\\nMaior margem encontrada: R$ ${maiorMargem.toFixed(2)}${rodape}`\n    }\n  }];\n}\n\n// ======================================================\n// APROVADO\n// ======================================================\n\nreturn elegiveisComMargem.map(v => {\n  const meses = calcularMeses(v.dataAdmissao);\n  return {\n    json: {\n      rota: 1,\n      cpf: v.cpf,\n      nome: v.nome,\n      dataNascimento: v.dataNascimento,\n      ...identificacao,\n      matricula: v.matricula,\n      margem: numero(v.valorMargemDisponivel),\n      valor_total_vencimentos: numero(v.valorTotalVencimentos),\n      valor_base_margem: numero(v.valorBaseMargem),\n      dataAdmissao: v.dataAdmissao,\n      nome_empregador: v.nomeEmpregador,\n      meses_vinculo: meses,\n      tempo_vinculo_formatado: formatarTempoVinculo(meses),\n      qt_emprestimos_ativos: v.qtdEmprestimosAtivosSuspensos,\n      ...flags,\n      base_atualizada_em: updatedAt\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3344,
+        128
+      ],
+      "id": "5f6106a0-068a-403c-a67f-d4dc1c4b365a",
+      "name": "ANALISA VÍNCULOS"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"resultado\": \"FALHA_CONSULTA\",\n  \"motivo\": \"falha_consulta_base_offline_reprocessar_loop\",\n  \"anotacao\": \"Falha temporária na consulta da base offline. Necessário realizar nova tentativa automática no loop.\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -3344,
+        -64
+      ],
+      "id": "4284b837-b89a-4962-a8f9-e9dcb8d64f61",
+      "name": "FALHA | CONSULTA BASE OFF"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -3568,
+        -64
+      ],
+      "id": "a2bd5a6d-1315-4ed5-90c6-aeea2815f06e",
+      "name": "FALHA AO CONSULTA BASE OFF",
+      "executeOnce": true
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -2896,
+        304
+      ],
+      "id": "87f0c295-a8fd-43f6-87d6-970f70d8336c",
+      "name": "5 SEGUNDOS",
+      "webhookId": "13c65721-0203-429a-856b-60058e3be069"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -2896,
+        112
+      ],
+      "id": "00ae1023-a2dd-43db-b84a-759b462db789",
+      "name": "NAO_APROVADO"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tentativas = 5;\nconst items = [];\n\nfor (let i = 1; i <= tentativas; i++) {\n  items.push({ json: { tentativa: i } });\n}\n\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4016,
+        208
+      ],
+      "id": "26d73eaa-954a-4c6c-9b2d-202abc7cf6be",
+      "name": "TENTATIVAS_ETAPA_BASE_OFF1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -3792,
+        208
+      ],
+      "id": "03b185f2-11a6-48b1-a287-bc0b223d51de",
+      "name": "TENTATIVAS"
+    },
+    {
+      "parameters": {
+        "url": "https://cltoff.facta.com.br/clt/base-offline",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "cpf",
+              "value": "={{ $('DADOS PARA O FLUXO').item.json.cpf }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $('DADOS PARA O FLUXO').item.json.token_base_off_facta }}"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3568,
+        128
+      ],
+      "id": "4b0443c1-e710-4e4b-bccb-ef1c8a9bcfa8",
+      "name": "CLT - OFFLINE",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "7f4f1819-05ea-4bb5-b723-8e7b0d333c0a",
+                    "leftValue": "={{ $json.rota }}",
+                    "rightValue": 1,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "PRÉ-APROVADO"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "cb5d00bc-c077-4d7b-a906-6f0a248f6206",
+                    "leftValue": "={{ $json.resultado }}",
+                    "rightValue": "NAO_APROVADO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "NAO_APROVADO"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "bd89ca33-86c6-44b3-90fb-21e0e44e3be5",
+                    "leftValue": "={{ $json.motivo }}",
+                    "rightValue": "base_offline_indisponivel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "base_offline_indisponivel"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -3120,
+        96
+      ],
+      "id": "d8b8b7a3-419f-41c9-b9ec-8ebbeb649ce9",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nfunction tentar(fn) {\n  try { return fn(); } catch (e) { return undefined; }\n}\n\n// ======================================================\n// CONFIGURAÇÃO (só mexer aqui)\n// ======================================================\n\n// Só trabalha com tabela GOLD COM seguro. Se a Facta devolver GOLD com valor_seguro = 0,\n// o cliente cai em \"sem_tabela_gold_com_seguro\". Pra liberar tabela sem seguro (emergência),\n// troque para false.\nconst EXIGIR_SEGURO = true;\n\n// Comissão mínima (%) aceita. 0 = aceita qualquer uma (as piores ficam só como último recurso\n// no ranking). Ex.: 4 = nunca oferece tabela que pague menos de 4%.\nconst COMISSAO_MINIMA = 0;\n\n// ======================================================\n// TABELA GOLD (COM seguro) — vigência 23/10/2026\n// Fonte: \"Crédito do Trabalhador - Divulgação 23/10/2026\".\n// A tabela nova NÃO tem mais faixa por tempo de vínculo: são tiers (PREMIUM > PLUS > POWER > PRIME).\n// comissao = Remuneração 1 (%) | comissao2 = Remuneração 2 (%), usada só como desempate.\n// Pra atualizar: troque as linhas abaixo (código / tier / prazo / comissão).\n// ======================================================\nconst COMISSOES_GOLD = [\n  { codigo: '71056', tier: 'PREMIUM', prazo: 24, comissao: 5.50, comissao2: 0 },\n  { codigo: '71064', tier: 'PREMIUM', prazo: 36, comissao: 6.00, comissao2: 0.50 },\n  { codigo: '71072', tier: 'PREMIUM', prazo: 48, comissao: 6.00, comissao2: 1.00 },\n  { codigo: '71080', tier: 'PREMIUM', prazo: 60, comissao: 6.00, comissao2: 2.00 },\n  { codigo: '71099', tier: 'PLUS',    prazo: 24, comissao: 3.50, comissao2: 0 },\n  { codigo: '71102', tier: 'PLUS',    prazo: 36, comissao: 4.50, comissao2: 0 },\n  { codigo: '71110', tier: 'PLUS',    prazo: 48, comissao: 5.00, comissao2: 0 },\n  { codigo: '71129', tier: 'PLUS',    prazo: 60, comissao: 6.00, comissao2: 0 },\n  { codigo: '71137', tier: 'POWER',   prazo: 24, comissao: 3.50, comissao2: 0 },\n  { codigo: '71145', tier: 'POWER',   prazo: 36, comissao: 4.25, comissao2: 0 },\n  { codigo: '71153', tier: 'POWER',   prazo: 48, comissao: 4.50, comissao2: 0 },\n  { codigo: '71170', tier: 'PRIME',   prazo: 24, comissao: 3.00, comissao2: 0 },\n  { codigo: '71188', tier: 'PRIME',   prazo: 36, comissao: 4.00, comissao2: 0 },\n  { codigo: '71196', tier: 'PRIME',   prazo: 48, comissao: 4.50, comissao2: 0 },\n];\n\nconst PRAZOS = [24, 36, 48, 60];\n\n// ======================================================\n// DADOS DO CLIENTE\n// ======================================================\n\nconst prazoMaximo = Number(item.prazo_maximo_disponivel) || 0;\n\n// meses de vínculo: o item vindo da política NÃO traz esse campo (antes caía em 0).\nconst meses = Number(\n  tentar(() => $('LOOP VINCULOS').item.json.meses_vinculo) ??\n  tentar(() => $('ANALISA VÍNCULOS').item.json.meses_vinculo) ??\n  item.meses_vinculo ??\n  0\n) || 0;\n\nfunction faixaDoCliente(m) {\n  if (m >= 121) return 'acima_10anos';\n  if (m >= 61) return 'faixa_61_120';\n  if (m >= 36) return 'faixa_36_60';\n  if (m >= 24) return 'faixa_24_35';\n  return 'abaixo_24';\n}\n\nconst faixaCliente = faixaDoCliente(meses);\n\n// ======================================================\n// RANKING POR PRAZO (maior comissão primeiro)\n// Se a Facta não devolver o tier melhor pro cliente, cai pro próximo da lista.\n// ======================================================\n\nconst rankingGoldPorPrazo = {};\n\nfor (const prazo of PRAZOS) {\n  if (prazo > prazoMaximo) continue;\n\n  const lista = COMISSOES_GOLD\n    .filter(r => r.prazo === prazo)\n    .filter(r => r.comissao >= COMISSAO_MINIMA)\n    .sort((x, y) => (y.comissao - x.comissao) || (y.comissao2 - x.comissao2));\n\n  if (lista.length) {\n    rankingGoldPorPrazo[prazo] = lista.map(r => ({\n      codigo: r.codigo,\n      tier: r.tier,\n      comissao: r.comissao,\n    }));\n  }\n}\n\nconst codigosGoldPorPrazo = {};\nfor (const [prazo, lista] of Object.entries(rankingGoldPorPrazo)) {\n  codigosGoldPorPrazo[prazo] = lista.map(r => r.codigo);\n}\n\nconst codigosValidosGold = [...new Set(Object.values(codigosGoldPorPrazo).flat())];\n\nreturn [{\n  json: {\n    ...item,\n\n    meses_vinculo: meses,\n    faixa_cliente: faixaCliente,\n    prazo_informado: prazoMaximo,\n\n    tabela_nome: 'NOVO GOLD',\n    exigir_seguro: EXIGIR_SEGURO,\n\n    // [{codigo, tier, comissao}] por prazo, já ordenado: o primeiro é o preferido\n    ranking_gold_por_prazo: rankingGoldPorPrazo,\n    codigos_gold_por_prazo: codigosGoldPorPrazo,\n    codigos_validos_gold: codigosValidosGold,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2224,
+        112
+      ],
+      "id": "85c4e3c9-a457-40b9-b5c8-b5395548a560",
+      "name": "definir tabela"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"nome\": \"{{ $('ANALISA VÍNCULOS').item.json.nome }}\",\n  \"dataNascimento\": \"{{ $('ANALISA VÍNCULOS').item.json.dataNascimento }}\",\n  \"resultado\": \"FALHA_CONSULTA\",\n  \"motivo\": \"falha_consulta_dataprev_vinculo\",\n  \"tempo_vinculo_formatado\": \"{{ $('ANALISA VÍNCULOS').item.json.tempo_vinculo_formatado }}\",\n  \"possui_vinculo_1_ano_com_margem\": {{ $('ANALISA VÍNCULOS').item.json.possui_vinculo_1_ano_com_margem }},\n  \"possui_margem_disponivel\": {{ $('ANALISA VÍNCULOS').item.json.possui_margem_disponivel }},\n  \"anotacao\": \"Falha na consulta de vínculos na base Dataprev. Não foi possível validar o vínculo do cliente neste momento. Necessário nova tentativa.\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -2224,
+        -80
+      ],
+      "id": "888e1a75-6322-41df-9124-f4b2acfcea6c",
+      "name": "falha_consulta_dataprev_vinculo"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"nome\": \"{{ $('ANALISA VÍNCULOS').item.json.nome }}\",\n  \"dataNascimento\": \"{{ $('ANALISA VÍNCULOS').item.json.dataNascimento }}\",\n  \"resultado\": \"FALHA_CONSULTA\",\n  \"motivo\": \"falha_analise_politica_credito\",\n  \"tempo_vinculo_formatado\": \"{{ $('ANALISA VÍNCULOS').item.json.tempo_vinculo_formatado }}\",\n  \"possui_vinculo_1_ano_com_margem\": {{ $('ANALISA VÍNCULOS').item.json.possui_vinculo_1_ano_com_margem }},\n  \"possui_margem_disponivel\": {{ $('ANALISA VÍNCULOS').item.json.possui_margem_disponivel }},\n  \"anotacao\": \"Vínculo elegível identificado, porém houve falha na API de análise de política de crédito. Necessário realizar nova tentativa.\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -2224,
+        304
+      ],
+      "id": "923c6f70-c34d-4e65-911f-4c2494d6f86a",
+      "name": "FALHA | POLÍTICA DE CRÉDITO"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -2224,
+        -272
+      ],
+      "id": "12df2e35-859b-422b-885a-e3ab7e8aa70e",
+      "name": "NAO_APROVADO-fora_politica_credito"
+    },
+    {
+      "parameters": {
+        "jsCode": "const vinculosElegiveis = $('ANALISA VÍNCULOS').all();\nconst nome = vinculosElegiveis[0]?.json.nome || 'Não informado';\nconst cpf = vinculosElegiveis[0]?.json.cpf || 'Não informado';\nconst dataNascimento = vinculosElegiveis[0]?.json.dataNascimento || null;\nconst baseAtualizadaEm = vinculosElegiveis[0]?.json.base_atualizada_em || 'Não informado';\nconst possuiVinculo1AnoComMargem = vinculosElegiveis[0]?.json.possui_vinculo_1_ano_com_margem || false;\nconst possuiMargemDisponivel = vinculosElegiveis[0]?.json.possui_margem_disponivel || false;\nconst nomeMae = vinculosElegiveis[0]?.json.nomeMae || null;\nconst sexo = vinculosElegiveis[0]?.json.sexo || null;\n\nconst identificacao = { nomeMae, sexo };\n\nconst detalhes = vinculosElegiveis.map(v =>\n  `• Matrícula: ${v.json.matricula} | Margem: R$ ${parseFloat(v.json.margem || 0).toFixed(2)} | Tempo: ${v.json.tempo_vinculo_formatado}`\n).join('\\n');\n\nreturn [{\n  json: {\n    resultado: \"NAO_APROVADO\",\n    motivo: \"fora_politica_credito\",\n    nome,\n    dataNascimento,\n    ...identificacao,\n    possui_vinculo_1_ano_com_margem: possuiVinculo1AnoComMargem,\n    possui_margem_disponivel: possuiMargemDisponivel,\n    anotacao: `Cliente: ${nome} | CPF: ${cpf}\\n\\nVínculos elegíveis encontrados, porém todos ficaram fora da política de crédito da Facta.\\n\\nVínculos analisados:\\n${detalhes}\\n\\nAs margens permanecem válidas — fluxo encaminhado para consulta em outros bancos.\\n\\nBase atualizada em: ${baseAtualizadaEm}`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2448,
+        -272
+      ],
+      "id": "9c71bf33-a88e-4137-9b70-c1a9f1ab751e",
+      "name": "MENSAGEM POLITICA",
+      "executeOnce": true
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -2672,
+        -272
+      ],
+      "id": "e5b408c1-beae-4e9c-8111-b379821ec1a7",
+      "name": "Operação fora da política de crédito",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "d5b90999-e5e6-4638-8e93-3a51efbf70d8",
+                    "leftValue": "={{ $json.mensagem }}",
+                    "rightValue": "Dados do trabalhador não encontrados. É obrigatório haver uma consulta DATAPREV.",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DATPREV"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "7a817035-4e3c-4fa5-9aea-365bd3cad86e",
+                    "leftValue": "={{ $json.valor_maximo_disponivel }}",
+                    "rightValue": 500,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gte"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "PRÉ_ APROVADO"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "eee48107-6fd0-4ca5-be91-662b109e4810",
+                    "leftValue": "={{ $json.mensagem }}",
+                    "rightValue": "Operação fora da política de crédito",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "política de crédito"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c96f94ac-feba-4b11-aaaa-267e13c78b04",
+                    "leftValue": "={{ $json.valor_maximo_disponivel }}",
+                    "rightValue": 499,
+                    "operator": {
+                      "type": "number",
+                      "operation": "lte"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ABAIXO DE 500"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -2448,
+        64
+      ],
+      "id": "f9234e5d-9284-4549-a0c6-37b56b6cb562",
+      "name": "Switch4"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -2896,
+        -80
+      ],
+      "id": "48067492-fd22-4b1b-a4f5-2654a2151693",
+      "name": "LOOP VINCULOS"
+    },
+    {
+      "parameters": {
+        "url": "https://webservice.facta.com.br/consignado-trabalhador/analise-politica-credito",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "cpf",
+              "value": "={{ $('ANALISA VÍNCULOS').item.json.cpf }}"
+            },
+            {
+              "name": "matricula",
+              "value": "={{ $json.matricula }}"
+            },
+            {
+              "name": "dataNascimento",
+              "value": "={{ $('ANALISA VÍNCULOS').item.json.dataNascimento }}"
+            },
+            {
+              "name": "dataAdmissao",
+              "value": "={{ $json.dataAdmissao }}"
+            },
+            {
+              "name": "prazo",
+              "value": "=26"
+            },
+            {
+              "name": "valorEmprestimo",
+              "value": "28000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $('DADOS PARA O FLUXO').item.json[\"TOKEN FACTA\"] }}"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -2672,
+        16
+      ],
+      "id": "bd65d203-d9b5-4603-aebc-3f0d96cc1cf0",
+      "name": "BUSCA PRAZO MAXIMO",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $('4-Consulta de Operações Disponíveis').item.json;\n\nconst analise = $('ANALISA VÍNCULOS').item.json;\nconst tabelaDefinida = $('definir tabela').item.json;\nconst prepPrestacao = $('PREPARA BUSCA PRESTACAO OFICIAL').item.json;\nconst rawParcelaMaxima = $('BUSCA PRESTACAO OFICIAL FACTA').item.json || {};\nconst politica = $('BUSCA PRAZO MAXIMO').item.json || {};\n\nconst nomeCliente = analise.nome;\nconst cpfCliente = analise.cpf;\nconst matricula = analise.matricula;\nconst nomeEmpregador = analise.nome_empregador;\nconst dataAdmissao = analise.dataAdmissao;\nconst dataNascimento = analise.dataNascimento || null;\nconst tempoVinculo = analise.tempo_vinculo_formatado;\nconst margem = Number(analise.margem || 0);\nconst emprestimosAtivos = analise.qt_emprestimos_ativos;\nconst baseAtualizadaEm = analise.base_atualizada_em;\n\n// Identificação (nome da mãe, sexo) sempre presente na saída\nconst identificacao = {\n  nomeMae: analise.nomeMae || null,\n  sexo: analise.sexo || null,\n};\n\nconst tabelaNome = tabelaDefinida.tabela_nome || 'NOVO GOLD';\nconst ranking = tabelaDefinida.ranking_gold_por_prazo || {};\nconst exigirSeguro = tabelaDefinida.exigir_seguro !== false;\n\nconst prazoMaximo = Number(politica.prazo_maximo_disponivel || 0);\nconst valorMaximo = Number(politica.valor_maximo_disponivel || 0);\n\nconst possuiVinculo1AnoComMargem = analise.possui_vinculo_1_ano_com_margem || false;\nconst possuiMargemDisponivel = analise.possui_margem_disponivel || false;\n\nfunction moneyToNumber(valor) {\n  if (valor === null || valor === undefined || valor === '') return 0;\n  if (typeof valor === 'number') return valor;\n\n  let texto = String(valor).trim();\n  texto = texto.replace(/[^\\d,.-]/g, '');\n\n  if (texto.includes(',') && texto.includes('.')) {\n    texto = texto.replace(/\\./g, '').replace(',', '.');\n  } else if (texto.includes(',')) {\n    texto = texto.replace(',', '.');\n  }\n\n  const numero = Number(texto);\n  return Number.isFinite(numero) ? numero : 0;\n}\n\nfunction formatBRL(valor) {\n  return Number(valor || 0).toLocaleString('pt-BR', {\n    minimumFractionDigits: 2,\n    maximumFractionDigits: 2,\n  });\n}\n\nfunction numeroTabela(nomeTabela) {\n  const match = String(nomeTabela || '').trim().match(/^(\\d+)/);\n  return match ? match[1] : '';\n}\n\nconst cabecalhoVendedor =\n  `👤 Cliente: ${nomeCliente}\\n` +\n  `🆔 CPF: ${cpfCliente}\\n` +\n  `📄 Matrícula: ${matricula}\\n` +\n  `🏢 Empregador: ${nomeEmpregador}\\n` +\n  `📅 Data de Admissão: ${dataAdmissao}\\n` +\n  `⏳ Tempo de Vínculo: ${tempoVinculo}\\n` +\n  `💰 Margem Disponível: R$ ${formatBRL(margem)}\\n` +\n  `📊 Tabela: ${tabelaNome}\\n` +\n  `🏦 Banco: FACTA\\n` +\n  `💼 Operação: Consignado CLT\\n` +\n  `📋 Empréstimos Ativos: ${emprestimosAtivos}`;\n\n// Campos comuns de toda saída que não é PRE_APROVADO\nconst base = {\n  nome: nomeCliente,\n  dataNascimento,\n  ...identificacao,\n  possui_vinculo_1_ano_com_margem: possuiVinculo1AnoComMargem,\n  possui_margem_disponivel: possuiMargemDisponivel,\n};\n\nconst rodape = `\\n\\nBase atualizada em: ${baseAtualizadaEm}`;\n\nconst dadosReferencia =\n  `\\n\\n📌 Prazo máximo: ${prazoMaximo}\\n📌 Valor máximo: R$ ${formatBRL(valorMaximo)}`;\n\n// ─── 1) ERROS DA CONSULTA DE OPERAÇÕES DISPONÍVEIS ──────────────────────────\n\n// Erros de negócio da consulta de operações.\nif (response.erro === true) {\n  const mensagemNegocio = response.mensagem || '';\n  const msgNegocioLower = mensagemNegocio.toLowerCase();\n\n  let motivo = 'regra_facta';\n  let titulo = mensagemNegocio || 'Cliente não aprovado pela regra da Facta.';\n\n  if (msgNegocioLower.includes('parcela em atraso')) {\n    motivo = 'parcela_em_atraso';\n    titulo = 'Cliente possui contrato com parcela em atraso na Facta.';\n  }\n\n  return [{\n    json: {\n      resultado: 'NAO_APROVADO',\n      motivo,\n      ...base,\n      anotacao: `${cabecalhoVendedor}\\n\\nSTATUS DA ANÁLISE\\n❌ ${titulo}\\n\\n${mensagemNegocio}${rodape}`,\n    }\n  }];\n}\n\nif (response.error) {\n  const statusCode = response.error?.status || 'desconhecido';\n\n  return [{\n    json: {\n      resultado: 'APROVADO_SEM_SIMULACAO',\n      motivo: 'falha_api_facta',\n      ...base,\n      anotacao: `${cabecalhoVendedor}\\n\\nSTATUS DA ANÁLISE\\n⚠️ Instabilidade na API da Facta (erro ${statusCode}).\\nCliente pré-aprovado, mas a simulação não foi gerada automaticamente.${rodape}`,\n    }\n  }];\n}\n\nif (!Array.isArray(response.tabelas)) {\n  return [{\n    json: {\n      resultado: 'APROVADO_SEM_SIMULACAO',\n      motivo: 'resposta_inesperada_api',\n      ...base,\n      anotacao: `${cabecalhoVendedor}\\n\\nSTATUS DA ANÁLISE\\n⚠️ Resposta inesperada da Facta, sem tabelas disponíveis.\\nEncaminhar para atendente.${rodape}`,\n    }\n  }];\n}\n\n// ─── 2) SEM TABELA POSSÍVEL (decidido no PREPARA BUSCA PRESTACAO OFICIAL) ────\n\nif (prepPrestacao.pular_busca_prestacao_oficial) {\n  const motivoPular = prepPrestacao.motivo_pular_busca_prestacao_oficial;\n\n  // Prazo da política (ex.: 12x) menor que qualquer tabela existente (24x+)\n  if (motivoPular === 'prazo_politica_incompativel') {\n    return [{\n      json: {\n        resultado: 'NAO_APROVADO',\n        motivo: 'sem_oferta_elegivel',\n        ...base,\n        anotacao: `${cabecalhoVendedor}\\n\\nSTATUS DA ANÁLISE\\n❌ Nenhuma oferta elegível: o prazo liberado pela política de crédito não comporta nenhuma tabela disponível (menor prazo: 24x).${dadosReferencia}${rodape}`,\n      }\n    }];\n  }\n\n  // Cliente aprovado na política, mas a Facta não devolveu GOLD com seguro\n  if (motivoPular === 'sem_tabela_gold_com_seguro') {\n    return [{\n      json: {\n        resultado: 'APROVADO_SEM_SIMULACAO',\n        motivo: 'sem_tabela_gold_com_seguro',\n        ...base,\n        anotacao: `${cabecalhoVendedor}\\n\\nSTATUS DA ANÁLISE\\n⚠️ A Facta não retornou nenhuma tabela GOLD com seguro para este cliente.\\nEncaminhar para atendente para simulação manual.${dadosReferencia}\\n📌 Tabelas retornadas pela Facta: ${JSON.stringify(prepPrestacao.codigos_retornados || {})}${rodape}`,\n      }\n    }];\n  }\n}\n\n// ─── 3) ERRO NA BUSCA DA PRESTAÇÃO OFICIAL ──────────────────────────────────\n\n// Se tiver prestacao_maxima, não é erro real: é justamente o dado que queremos.\nif (rawParcelaMaxima.erro === true && !rawParcelaMaxima.prestacao_maxima) {\n  const mensagemErro = rawParcelaMaxima.mensagem || '';\n  const msgLower = mensagemErro.toLowerCase();\n\n  if (msgLower.includes('não perturbe') || msgLower.includes('nao perturbe')) {\n    return [{\n      json: {\n        resultado: 'NAO_APROVADO',\n        motivo: 'cliente_nao_perturbe',\n        ...base,\n        anotacao: `${cabecalhoVendedor}\\n\\nSTATUS DA ANÁLISE\\n🚫 Cliente registrado no Não Perturbe.\\nOperação bloqueada pela Facta.${rodape}`,\n      }\n    }];\n  }\n\n  return [{\n    json: {\n      resultado: 'APROVADO_SEM_SIMULACAO',\n      motivo: 'falha_busca_parcela',\n      ...base,\n      anotacao: `${cabecalhoVendedor}\\n\\nSTATUS DA ANÁLISE\\n⚠️ Erro ao buscar prestação máxima: ${mensagemErro}\\nEncaminhar para atendente para simulação manual.${rodape}`,\n    }\n  }];\n}\n\n// ─── 4) PROCESSAMENTO DAS OFERTAS ───────────────────────────────────────────\n\nconst prestacaoOficial = moneyToNumber(rawParcelaMaxima.prestacao_maxima);\nconst prestacaoPreparada = moneyToNumber(prepPrestacao.valor_parcela);\nconst parcelaReferencia = prestacaoOficial > 0 ? prestacaoOficial : prestacaoPreparada;\n\nfunction posicaoNoRanking(o) {\n  const lista = ranking[Number(o.prazo)] || [];\n  return lista.findIndex(r => r.codigo === numeroTabela(o.tabela));\n}\n\n// Só entra oferta GOLD da allowlist (por prazo) e, se exigido, COM seguro.\n// Não existe mais fallback para \"qualquer tabela\".\nconst ofertasGoldElegiveis = response.tabelas\n  .map(o => {\n    const posicao = posicaoNoRanking(o);\n    return {\n      ...o,\n      codigo_base_tabela: numeroTabela(o.tabela),\n      ranking_posicao: posicao,\n      comissao: posicao >= 0 ? ranking[Number(o.prazo)][posicao].comissao : null,\n      temSeguro: Number(o.valor_seguro || 0) > 0,\n    };\n  })\n  .filter(o => o.ranking_posicao >= 0)\n  .filter(o => !exigirSeguro || o.temSeguro);\n\nconst ofertasRecalculadas = ofertasGoldElegiveis.map(o => {\n  const coeficiente = Number(o.coeficiente || 0);\n  const parcelaOriginal = Number(o.parcela || 0);\n\n  const limites = [];\n\n  if (parcelaReferencia > 0) limites.push(parcelaReferencia);\n  if (valorMaximo > 0 && coeficiente > 0) limites.push(valorMaximo * coeficiente);\n  if (parcelaOriginal > 0) limites.push(parcelaOriginal);\n  if (margem > 0) limites.push(Math.max(margem - 1, 0));\n\n  const parcelaEfetiva = limites.length ? Math.min(...limites) : 0;\n  const valorLiquidoEfetivo = coeficiente > 0 ? parcelaEfetiva / coeficiente : 0;\n\n  return {\n    ...o,\n    parcela_original: o.parcela,\n    valor_liquido_original: o.valor_liquido,\n    parcela: parcelaEfetiva,\n    valor_liquido: valorLiquidoEfetivo,\n    prestacao_oficial_facta: prestacaoOficial || null,\n  };\n});\n\nconst ofertasValidas = ofertasRecalculadas.filter(o =>\n  Number(o.prazo) <= prazoMaximo &&\n  Number(o.prazo) >= 12 &&\n  Number(o.valor_liquido) >= 500 &&\n  Number(o.parcela) > 0 &&\n  Number(o.coeficiente) > 0\n);\n\n// Por prazo: vence a de MAIOR comissão (menor posição no ranking).\n// Empate de posição: maior valor líquido.\nconst prazosMapeados = {};\n\nofertasValidas.forEach(o => {\n  const prazo = Number(o.prazo);\n  const atual = prazosMapeados[prazo];\n\n  if (!atual) {\n    prazosMapeados[prazo] = o;\n    return;\n  }\n\n  if (o.ranking_posicao < atual.ranking_posicao) {\n    prazosMapeados[prazo] = o;\n    return;\n  }\n\n  if (o.ranking_posicao === atual.ranking_posicao && Number(o.valor_liquido) > Number(atual.valor_liquido)) {\n    prazosMapeados[prazo] = o;\n  }\n});\n\nconst ofertasDeduplicadas = Object.values(prazosMapeados)\n  .sort((a, b) => Number(a.prazo) - Number(b.prazo));\n\nif (!ofertasDeduplicadas.length) {\n  return [{\n    json: {\n      resultado: 'NAO_APROVADO',\n      motivo: 'sem_oferta_elegivel',\n      ...base,\n      anotacao: `${cabecalhoVendedor}\\n\\nSTATUS DA ANÁLISE\\n❌ Nenhuma oferta elegível: o prazo/valor liberado pela política de crédito não é compatível com as tabelas disponíveis.\\n\\n📌 Tabela preparada: ${prepPrestacao.tabela_escolhida || '-'}\\n📌 Prestação oficial: ${prestacaoOficial ? `R$ ${formatBRL(prestacaoOficial)}` : 'Não retornada'}${dadosReferencia}${rodape}`,\n    }\n  }];\n}\n\nlet opcoes = [];\n\nif (ofertasDeduplicadas.length === 1) {\n  opcoes = [{ tipo: 'ÚNICA OPÇÃO', ...ofertasDeduplicadas[0] }];\n} else if (ofertasDeduplicadas.length === 2) {\n  opcoes = [\n    { tipo: 'MENOR PRAZO', ...ofertasDeduplicadas[0] },\n    { tipo: 'MAIOR PRAZO', ...ofertasDeduplicadas[ofertasDeduplicadas.length - 1] },\n  ];\n} else {\n  opcoes = [\n    { tipo: 'MENOR PRAZO', ...ofertasDeduplicadas[0] },\n    { tipo: 'PRAZO DO MEIO', ...ofertasDeduplicadas[Math.floor(ofertasDeduplicadas.length / 2)] },\n    { tipo: 'MAIOR PRAZO', ...ofertasDeduplicadas[ofertasDeduplicadas.length - 1] },\n  ];\n}\n\nconst temMaisDeUma = opcoes.length > 1;\nconst maiorValor = formatBRL(opcoes[opcoes.length - 1].valor_liquido);\nconst nomeFormatado = String(nomeCliente || '').split(' ')[0] || 'cliente';\n\n// Anotação: só parcela e valor a receber (sem tabela e sem comissão), pra poder ser reaproveitada em outras automações.\n// A tabela de cada oferta vai separada em `tabelas_ofertas` e em `dados_digitacao.opcoes`.\nconst resumoOfertas = opcoes.map(o =>\n  `🔹 ${o.prazo}x de R$ ${formatBRL(o.parcela)} | Recebe: R$ ${formatBRL(o.valor_liquido)}`\n).join('\\n');\n\nconst tabelasOfertas = opcoes.map(o => ({\n  prazo: Number(o.prazo),\n  tabela: o.tabela,\n  codigoTabela: String(o.codigoTabela),\n}));\n\nconst anotacao =\n  `${cabecalhoVendedor}\\n\\n` +\n  `OFERTAS GERADAS\\n${resumoOfertas}\\n\\n` +\n  `📌 Prestação oficial Facta: ${prestacaoOficial ? `R$ ${formatBRL(prestacaoOficial)}` : 'Não retornada'}` +\n  rodape;\n\nlet mensagem = `Boa notícia, ${nomeFormatado}! 🎉 Sua análise foi aprovada!\\n\\n`;\nmensagem += `✅ Aprovado sem consulta ao SPC/Serasa\\n`;\nmensagem += `💵 Você pode receber ${temMaisDeUma ? 'até ' : ''}R$ ${maiorValor} na sua conta!\\n\\n`;\nmensagem += temMaisDeUma\n  ? 'Separei as condições disponíveis para você:\\n\\n'\n  : 'Segue a condição disponível para você:\\n\\n';\n\nmensagem += opcoes.map(o =>\n  `🔹 ${o.prazo}x de R$ ${formatBRL(o.parcela)}\\n💰 Valor a receber: R$ ${formatBRL(o.valor_liquido)}`\n).join('\\n\\n');\n\nmensagem += '\\n📝 Parcelas descontadas direto no contracheque, sem impacto no seu orçamento.';\nmensagem += '\\n⏰ Proposta válida por tempo limitado.';\nmensagem += '\\n\\n👉 *' + (\n  temMaisDeUma\n    ? 'Qual condição você prefere ou quer que eu verifique outras possibilidades?'\n    : 'Deseja seguir com essa condição ou prefere que eu verifique outras possibilidades?'\n) + '*';\n\nreturn [{\n  json: {\n    resultado: 'PRE_APROVADO',\n    motivo: null,\n    ...base,\n    anotacao,\n    mensagem,\n    tabelas_ofertas: tabelasOfertas,\n    tabela_nome: tabelaNome,\n    matricula,\n    cpf: cpfCliente,\n    dados_digitacao: {\n      matricula,\n      opcoes: opcoes.map(o => ({\n        prazo: Number(o.prazo),\n        parcela: Number(Number(o.parcela).toFixed(2)),\n        valor_liquido: Number(Number(o.valor_liquido).toFixed(2)),\n        codigoTabela: String(o.codigoTabela),\n        nomeTabela: o.tabela,\n        coeficiente: Number(o.coeficiente),\n      })),\n    },\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1008,
+        112
+      ],
+      "id": "7135ee3a-365a-4e0a-a10b-d12996499fc9",
+      "name": "PROCESSA OFERTAS"
+    },
+    {
+      "parameters": {
+        "url": "https://webservice.facta.com.br/proposta/operacoes-disponiveis",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "produto",
+              "value": "D"
+            },
+            {
+              "name": "tipo_operacao",
+              "value": "13"
+            },
+            {
+              "name": "averbador",
+              "value": "10010"
+            },
+            {
+              "name": "convenio",
+              "value": "3"
+            },
+            {
+              "name": "opcao_valor",
+              "value": "2"
+            },
+            {
+              "name": "cpf",
+              "value": "={{ $('ANALISA VÍNCULOS').item.json.cpf }}"
+            },
+            {
+              "name": "data_nascimento",
+              "value": "={{ $('ANALISA VÍNCULOS').item.json.dataNascimento }}"
+            },
+            {
+              "name": "valor_renda",
+              "value": "10000"
+            },
+            {
+              "name": "valor_parcela",
+              "value": "={{ $json.prestacao_maxima }}"
+            },
+            {
+              "name": "matricula",
+              "value": "={{ $('LOOP VINCULOS').item.json.matricula }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $('DADOS PARA O FLUXO').item.json[\"TOKEN FACTA\"] }}"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1776,
+        112
+      ],
+      "id": "9c179315-8134-442a-a440-9edb0baf81e5",
+      "name": "4-Consulta de Operações Disponíveis",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function numero(valor) {\n  if (valor === null || valor === undefined) return 0;\n\n  const texto = String(valor).trim();\n  if (!texto) return 0;\n\n  if (texto.includes(',')) {\n    return Number(\n      texto\n        .replace(/[^\\d,.-]/g, '')\n        .replace(/\\./g, '')\n        .replace(',', '.')\n    ) || 0;\n  }\n\n  return Number(texto.replace(/[^\\d.-]/g, '')) || 0;\n}\n\nconst margem = numero($('ANALISA VÍNCULOS').item.json.margem);\n\nif (margem <= 0) {\n  return [{\n    json: {\n      ...$json,\n      erro: true,\n      mensagem: 'Margem indisponível ou inválida para calcular prestação máxima de consulta.',\n      prestacao_maxima: null,\n      margem_base_off: margem,\n      origem_prestacao_maxima: 'margem_base_off'\n    }\n  }];\n}\n\n// Este valor é só para consultar as tabelas disponíveis.\n// A prestação final será confirmada depois na etapa1-simulador com tabela real.\nconst prestacaoConsulta = Math.max(0, margem - 1);\n\nreturn [{\n  json: {\n    ...$json,\n    erro: false,\n    prestacao_maxima: Number(prestacaoConsulta.toFixed(2)),\n    prestacao_consulta: Number(prestacaoConsulta.toFixed(2)),\n    margem_base_off: Number(margem.toFixed(2)),\n    origem_prestacao_maxima: 'margem_base_off'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2000,
+        112
+      ],
+      "id": "a85297f7-3493-44ec-99b3-fe418d9036f4",
+      "name": "BSUCA PARCELA MAXIMA"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\nconst tabelas = Array.isArray(response.tabelas) ? response.tabelas : [];\n\nconst tabelaDefinida = $('definir tabela').item.json;\nconst ranking = tabelaDefinida.ranking_gold_por_prazo || {};\nconst exigirSeguro = tabelaDefinida.exigir_seguro !== false;\n\nif (!tabelas.length) {\n  return [{\n    json: {\n      erro: true,\n      pular_busca_prestacao_oficial: true,\n      motivo_pular_busca_prestacao_oficial: 'sem_tabelas_facta',\n      mensagem: 'Facta não retornou tabelas em operacoes-disponiveis.',\n      tabelas,\n    }\n  }];\n}\n\n// Política liberou prazo menor que o menor prazo das tabelas GOLD (24x): não existe tabela possível.\nif (!Object.keys(ranking).length) {\n  return [{\n    json: {\n      erro: true,\n      pular_busca_prestacao_oficial: true,\n      motivo_pular_busca_prestacao_oficial: 'prazo_politica_incompativel',\n      mensagem: 'Prazo máximo da política não comporta nenhuma tabela GOLD.',\n      tabelas,\n    }\n  }];\n}\n\nfunction numeroTabela(nomeTabela) {\n  const match = String(nomeTabela || '').trim().match(/^(\\d+)/);\n  return match ? match[1] : '';\n}\n\nfunction tabelaValida(t) {\n  return t && t.codigoTabela && t.tabela && t.prazo && t.coeficiente && t.parcela && t.valor_liquido;\n}\n\nfunction posicaoNoRanking(t) {\n  const lista = ranking[Number(t.prazo)] || [];\n  return lista.findIndex(r => r.codigo === numeroTabela(t.tabela));\n}\n\nfunction temSeguro(t) {\n  return Number(t.valor_seguro || 0) > 0;\n}\n\n// Só GOLD da allowlist do cliente (por prazo) e, se exigido, COM seguro.\nconst candidatas = tabelas\n  .filter(tabelaValida)\n  .filter(t => posicaoNoRanking(t) >= 0)\n  .filter(t => !exigirSeguro || temSeguro(t));\n\nif (!candidatas.length) {\n  const resumo = {};\n  tabelas.forEach(t => {\n    const cod = numeroTabela(t.tabela);\n    if (!resumo[cod]) resumo[cod] = { prazos: [], com_seguro: false };\n    resumo[cod].prazos.push(Number(t.prazo));\n    if (temSeguro(t)) resumo[cod].com_seguro = true;\n  });\n\n  return [{\n    json: {\n      erro: true,\n      pular_busca_prestacao_oficial: true,\n      motivo_pular_busca_prestacao_oficial: 'sem_tabela_gold_com_seguro',\n      mensagem: 'Nenhuma tabela GOLD com seguro disponível na resposta da Facta.',\n      codigos_retornados: resumo,\n      tabelas,\n    }\n  }];\n}\n\n// A busca da prestação oficial usa 1 tabela só: a do maior prazo e, nele, a de maior comissão.\ncandidatas.sort((a, b) => {\n  const prazoB = Number(b.prazo);\n  const prazoA = Number(a.prazo);\n  if (prazoB !== prazoA) return prazoB - prazoA;\n  return posicaoNoRanking(a) - posicaoNoRanking(b);\n});\n\nconst escolhida = candidatas[0];\nconst posicao = posicaoNoRanking(escolhida);\nconst comissaoEscolhida = ranking[Number(escolhida.prazo)][posicao].comissao;\n\nreturn [{\n  json: {\n    erro: false,\n    pular_busca_prestacao_oficial: false,\n\n    codigo_base_esperado: numeroTabela(escolhida.tabela),\n    tabela_escolhida: escolhida.tabela,\n    codigo_tabela: Number(escolhida.codigoTabela),\n    prazo: Number(escolhida.prazo),\n    coeficiente: Number(escolhida.coeficiente),\n    valor_operacao: Number(escolhida.valor_liquido),\n    valor_parcela: Number(escolhida.parcela),\n\n    tem_seguro: temSeguro(escolhida),\n    comissao_escolhida: comissaoEscolhida,\n\n    total_tabelas: tabelas.length,\n    total_candidatas: candidatas.length,\n\n    tabelas,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1552,
+        112
+      ],
+      "id": "945e8b7a-8111-492d-bbf7-1c903fc7151d",
+      "name": "PREPARA BUSCA PRESTACAO OFICIAL"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webservice.facta.com.br/proposta/etapa1-simulador",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $('DADOS PARA O FLUXO').item.json[\"TOKEN FACTA\"] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "produto",
+              "value": "D"
+            },
+            {
+              "name": "tipo_operacao",
+              "value": "13"
+            },
+            {
+              "name": "averbador",
+              "value": "10010"
+            },
+            {
+              "name": "convenio",
+              "value": "3"
+            },
+            {
+              "name": "cpf",
+              "value": "={{ $('LOOP VINCULOS').item.json.cpf }}"
+            },
+            {
+              "name": "data_nascimento",
+              "value": "={{ $('LOOP VINCULOS').item.json.dataNascimento }}"
+            },
+            {
+              "name": "login_certificado",
+              "value": "={{ $('DADOS PARA O FLUXO').item.json.Usuario_certificado }}"
+            },
+            {
+              "name": "codigo_tabela",
+              "value": "={{ $json.codigo_tabela }}"
+            },
+            {
+              "name": "prazo",
+              "value": "={{ $json.prazo }}"
+            },
+            {
+              "name": "valor_operacao",
+              "value": "={{ $json.valor_operacao }}"
+            },
+            {
+              "name": "valor_parcela",
+              "value": "={{ $json.valor_parcela }}"
+            },
+            {
+              "name": "coeficiente",
+              "value": "={{ $json.coeficiente }}"
+            },
+            {
+              "name": "codigo_master",
+              "value": "={{ $('DADOS PARA O FLUXO').item.json[\"codigo_master FACTA\"] }}"
+            },
+            {
+              "name": "matricula",
+              "value": "={{ $('LOOP VINCULOS').item.json.matricula }}"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1328,
+        112
+      ],
+      "id": "dc4086be-33aa-4d80-9240-e4fa6e4773f2",
+      "name": "BUSCA PRESTACAO OFICIAL FACTA",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://app.esteiradeleads.shop/leads/{{ $('Webhook').item.json.body.ref }}/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Service-Token",
+              "value": "COLE_AQUI_O_TOKEN_DO_PAINEL_ESTEIRA"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"com_oferta\",\n  \"resultado\": {\n    \"banco\": \"FACTA\",\n    \"oferta\": {{ JSON.stringify($('PROCESSA OFERTAS').item.json.anotacao || '') }}\n  },\n  \"motivo_status\": \"sem whatsapp valido encontrado\",\n  \"texto_oferta\": null,\n  \"link_whatsapp\": null\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -688,
+        112
+      ],
+      "id": "b71bde3c-e07e-424e-a0b5-ac48c7cb0143",
+      "name": "Avisar Painel - oferta facta",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://factaclt.automacaofintech.digital/resultado",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_id\": {{ JSON.stringify($('Webhook').first().json.body.job_id) }},\n  \"resultado\": {{ JSON.stringify($json.resultado) }},\n  \"motivo\": {{ JSON.stringify($json.motivo ?? null) }},\n  \"banco\": \"FACTA\",\n  \"margem\": {{ JSON.stringify($('ANALISA VÍNCULOS').first().json.margem ?? null) }},\n  \"valor_liquido_max\": {{ JSON.stringify(Math.max(0, ...(($json.dados_digitacao && $json.dados_digitacao.opcoes) || []).map(o => Number(o.valor_liquido) || 0)) || null) }}\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -848,
+        112
+      ],
+      "id": "ed59039b-44bf-4a54-b6ef-4004830475fb",
+      "name": "Reportar Resultado - ofertas",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notes": "Reporta o desfecho ao painel do servico Facta (metricas). Falha aqui nao derruba o fluxo."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://factaclt.automacaofintech.digital/resultado",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_id\": {{ JSON.stringify($('Webhook').first().json.body.job_id) }},\n  \"resultado\": {{ JSON.stringify($json.resultado) }},\n  \"motivo\": {{ JSON.stringify($json.motivo ?? null) }},\n  \"banco\": null,\n  \"margem\": {{ JSON.stringify($json.margem ?? null) }},\n  \"valor_liquido_max\": null\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -2672,
+        112
+      ],
+      "id": "3022e85d-f5b1-46b9-91a8-828a91436b28",
+      "name": "Reportar Resultado - nao aprovado",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notes": "Reporta o desfecho ao painel do servico Facta (metricas). Falha aqui nao derruba o fluxo."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://factaclt.automacaofintech.digital/resultado",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_id\": {{ JSON.stringify($('Webhook').first().json.body.job_id) }},\n  \"resultado\": {{ JSON.stringify($json.resultado) }},\n  \"motivo\": {{ JSON.stringify($json.motivo ?? null) }},\n  \"banco\": null,\n  \"margem\": {{ JSON.stringify($('ANALISA VÍNCULOS').first().json.margem ?? null) }},\n  \"valor_liquido_max\": null\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1984,
+        -272
+      ],
+      "id": "c15894fc-2cbb-4d21-b27e-1d3cd7f2601c",
+      "name": "Reportar Resultado - fora politica",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notes": "Reporta o desfecho ao painel do servico Facta (metricas). Falha aqui nao derruba o fluxo."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://factaclt.automacaofintech.digital/resultado",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_id\": {{ JSON.stringify($('Webhook').first().json.body.job_id) }},\n  \"resultado\": \"FALHA_CONSULTA\",\n  \"motivo\": \"falha_consulta_base_offline_reprocessar_loop\",\n  \"banco\": null,\n  \"margem\": null,\n  \"valor_liquido_max\": null\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3120,
+        -64
+      ],
+      "id": "374dfc72-0d1f-4a4c-9ae5-074c03499480",
+      "name": "Reportar Resultado - falha base off",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notes": "Reporta o desfecho ao painel do servico Facta (metricas). Falha aqui nao derruba o fluxo."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://factaclt.automacaofintech.digital/resultado",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_id\": {{ JSON.stringify($('Webhook').first().json.body.job_id) }},\n  \"resultado\": \"FALHA_CONSULTA\",\n  \"motivo\": \"falha_consulta_dataprev_vinculo\",\n  \"banco\": null,\n  \"margem\": null,\n  \"valor_liquido_max\": null\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1984,
+        -80
+      ],
+      "id": "80c4d443-b3d0-4816-bc59-4c453a3c0a1e",
+      "name": "Reportar Resultado - falha dataprev",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notes": "Reporta o desfecho ao painel do servico Facta (metricas). Falha aqui nao derruba o fluxo."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://factaclt.automacaofintech.digital/resultado",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_id\": {{ JSON.stringify($('Webhook').first().json.body.job_id) }},\n  \"resultado\": \"FALHA_CONSULTA\",\n  \"motivo\": \"falha_analise_politica_credito\",\n  \"banco\": null,\n  \"margem\": null,\n  \"valor_liquido_max\": null\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1984,
+        304
+      ],
+      "id": "5e4a19e0-eeab-4b28-b347-2d740173c24b",
+      "name": "Reportar Resultado - falha politica",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "notes": "Reporta o desfecho ao painel do servico Facta (metricas). Falha aqui nao derruba o fluxo."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"resultado\": {{ JSON.stringify($('PROCESSA OFERTAS').first().json.resultado) }},\n  \"motivo\": {{ JSON.stringify($('PROCESSA OFERTAS').first().json.motivo ?? null) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -528,
+        112
+      ],
+      "id": "51d83615-f90e-48df-8bd7-ac73d8957244",
+      "name": "RESPOSTA | OFERTAS"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "PUXA TOKEN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DADOS PARA O FLUXO": {
+      "main": [
+        [
+          {
+            "node": "TENTATIVAS_ETAPA_BASE_OFF1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PUXA TOKEN": {
+      "main": [
+        [
+          {
+            "node": "DADOS PARA O FLUXO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ANALISA VÍNCULOS": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FALHA AO CONSULTA BASE OFF": {
+      "main": [
+        [
+          {
+            "node": "FALHA | CONSULTA BASE OFF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5 SEGUNDOS": {
+      "main": [
+        [
+          {
+            "node": "TENTATIVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TENTATIVAS_ETAPA_BASE_OFF1": {
+      "main": [
+        [
+          {
+            "node": "TENTATIVAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TENTATIVAS": {
+      "main": [
+        [
+          {
+            "node": "FALHA AO CONSULTA BASE OFF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CLT - OFFLINE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CLT - OFFLINE": {
+      "main": [
+        [
+          {
+            "node": "ANALISA VÍNCULOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "LOOP VINCULOS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NAO_APROVADO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "5 SEGUNDOS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "5 SEGUNDOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "definir tabela": {
+      "main": [
+        [
+          {
+            "node": "BSUCA PARCELA MAXIMA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MENSAGEM POLITICA": {
+      "main": [
+        [
+          {
+            "node": "NAO_APROVADO-fora_politica_credito",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Operação fora da política de crédito": {
+      "main": [
+        [
+          {
+            "node": "MENSAGEM POLITICA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch4": {
+      "main": [
+        [
+          {
+            "node": "falha_consulta_dataprev_vinculo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "definir tabela",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LOOP VINCULOS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LOOP VINCULOS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "FALHA | POLÍTICA DE CRÉDITO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LOOP VINCULOS": {
+      "main": [
+        [
+          {
+            "node": "Operação fora da política de crédito",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "BUSCA PRAZO MAXIMO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUSCA PRAZO MAXIMO": {
+      "main": [
+        [
+          {
+            "node": "Switch4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESSA OFERTAS": {
+      "main": [
+        [
+          {
+            "node": "Reportar Resultado - ofertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4-Consulta de Operações Disponíveis": {
+      "main": [
+        [
+          {
+            "node": "PREPARA BUSCA PRESTACAO OFICIAL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BSUCA PARCELA MAXIMA": {
+      "main": [
+        [
+          {
+            "node": "4-Consulta de Operações Disponíveis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PREPARA BUSCA PRESTACAO OFICIAL": {
+      "main": [
+        [
+          {
+            "node": "BUSCA PRESTACAO OFICIAL FACTA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUSCA PRESTACAO OFICIAL FACTA": {
+      "main": [
+        [
+          {
+            "node": "PROCESSA OFERTAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reportar Resultado - ofertas": {
+      "main": [
+        [
+          {
+            "node": "Avisar Painel - oferta facta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar Painel - oferta facta": {
+      "main": [
+        [
+          {
+            "node": "RESPOSTA | OFERTAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NAO_APROVADO": {
+      "main": [
+        [
+          {
+            "node": "Reportar Resultado - nao aprovado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NAO_APROVADO-fora_politica_credito": {
+      "main": [
+        [
+          {
+            "node": "Reportar Resultado - fora politica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FALHA | CONSULTA BASE OFF": {
+      "main": [
+        [
+          {
+            "node": "Reportar Resultado - falha base off",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "falha_consulta_dataprev_vinculo": {
+      "main": [
+        [
+          {
+            "node": "Reportar Resultado - falha dataprev",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FALHA | POLÍTICA DE CRÉDITO": {
+      "main": [
+        [
+          {
+            "node": "Reportar Resultado - falha politica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "1db0351aa79c4548d0d3a33d1a1db2047a3dccdb4e110fa1cca7ffa35a91ba76"
+  }
+}

@@ -23,6 +23,8 @@ _contador_sequencia = itertools.count()
 SEGUNDOS_JOB_FINALIZADO_EM_MEMORIA = 600
 
 PERMITIR_REDE_PRIVADA = os.getenv("WEBHOOK_PERMITIR_REDE_PRIVADA", "false").lower() in ("1", "true", "yes")
+WEBHOOK_TIMEOUT_SEGUNDOS = float(os.getenv("WEBHOOK_TIMEOUT_SEGUNDOS", "60"))
+STATUS_RETRY_WEBHOOK = {408, 425, 429, 502, 503, 504}
 
 
 # ------------------------------------------------------------------
@@ -368,7 +370,8 @@ class FilaSimulacao:
 
     async def _entregador(self):
         logger.info("Entregador de webhooks iniciado")
-        async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+        timeout = httpx.Timeout(10.0, read=WEBHOOK_TIMEOUT_SEGUNDOS, pool=WEBHOOK_TIMEOUT_SEGUNDOS)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             while True:
                 try:
                     pendentes = database.webhooks_para_enviar(50)
@@ -383,6 +386,14 @@ class FilaSimulacao:
                     await asyncio.sleep(5)
 
     async def _enviar_webhook(self, client: httpx.AsyncClient, w: dict):
+        """
+        Regras de reenvio (o destino costuma ser um fluxo do n8n que EXECUTA algo a
+        cada POST - reenviar sem necessidade roda o fluxo duas vezes):
+          - 2xx                      -> entregue.
+          - ReadTimeout (n8n recebeu, so nao respondeu a tempo) -> entregue (com aviso), SEM reenviar.
+          - erro de conexao / 408 / 425 / 429 / 502 / 503 / 504 -> retry com backoff.
+          - qualquer outro non-2xx (500, 404, 400...) -> 'falhou' definitivo (reenvio manual no painel).
+        """
         try:
             if not PERMITIR_REDE_PRIVADA:
                 await asyncio.to_thread(_resolve_e_checa, w["url"])
@@ -391,10 +402,20 @@ class FilaSimulacao:
                 content=w["payload_json"],
                 headers={"Content-Type": "application/json", "User-Agent": "facta-clt-webhook/1.0"},
             )
+            trecho = resp.text[:300]
             if 200 <= resp.status_code < 300:
-                database.marcar_webhook_entregue(w["id"])
+                database.marcar_webhook_entregue(w["id"], status_http=resp.status_code, resposta=trecho)
             else:
-                database.marcar_webhook_falha(w["id"], f"HTTP {resp.status_code}: {resp.text[:150]}")
+                transitorio = resp.status_code in STATUS_RETRY_WEBHOOK
+                database.marcar_webhook_falha(
+                    w["id"], f"HTTP {resp.status_code}: {trecho[:150]}",
+                    definitivo=not transitorio, status_http=resp.status_code, resposta=trecho,
+                )
+        except httpx.ReadTimeout:
+            logger.warning(f"Webhook {w['id']} (job {w['job_id']}): sem resposta em {WEBHOOK_TIMEOUT_SEGUNDOS:.0f}s; "
+                           "considerado entregue (nao reenviado para nao duplicar a execucao)")
+            database.marcar_webhook_entregue(
+                w["id"], obs=f"sem resposta em {WEBHOOK_TIMEOUT_SEGUNDOS:.0f}s (provavelmente recebido; nao reenviado)")
         except Exception as e:
             logger.warning(f"Webhook {w['id']} (job {w['job_id']}) falhou: {e}")
             database.marcar_webhook_falha(w["id"], f"{type(e).__name__}: {e}")

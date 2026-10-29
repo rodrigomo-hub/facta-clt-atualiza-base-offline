@@ -121,6 +121,18 @@
   </section>
 
   <section>
+    <div class="section-title">Funil de resultado (hoje)</div>
+    <div class="cards" id="funilCards"></div>
+    <table id="tabelaMotivos">
+      <thead><tr><th>Resultado</th><th>Motivo</th><th>Qtd</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div id="funilObs" style="color:#777; font-size:12px; margin-top:6px;">
+      "Base atualizada" = a Facta respondeu. Os números abaixo vêm do fluxo (n8n) via POST /resultado.
+    </div>
+  </section>
+
+  <section>
     <div class="section-title">Saldo do proxy (tráfego)</div>
     <div id="saldoStatus" style="margin-bottom:10px; font-size:13px;"></div>
     <div style="background:#1a1d24; border:1px solid #2a2d35; border-radius:6px; height:10px; margin-bottom:12px; overflow:hidden;">
@@ -141,7 +153,7 @@
   <section>
     <div class="section-title">Por equipe (hoje)</div>
     <table id="tabelaEquipes">
-      <thead><tr><th>Equipe</th><th>Autorizado</th><th>Falha</th><th>Sem retorno</th><th>Rate limit</th><th>Bloqueio IP</th><th>Na fila</th><th>Processando</th><th>Total</th></tr></thead>
+      <thead><tr><th>Equipe</th><th>Base atualizada</th><th>Falha</th><th>Sem retorno</th><th>Rate limit</th><th>Bloqueio IP</th><th>Na fila</th><th>Processando</th><th>Total</th></tr></thead>
       <tbody></tbody>
     </table>
   </section>
@@ -156,6 +168,7 @@
 
 <script>
 async function carregar() {
+  carregarFunil();
   const stats = await fetch('/admin/stats/hoje').then(r => r.json());
   const config = await fetch('/admin/config').then(r => r.json());
   const ultimas = await fetch('/admin/requisicoes?limite=30').then(r => r.json());
@@ -164,7 +177,7 @@ async function carregar() {
   const ps = stats.por_status || {};
   cardsDiv.innerHTML = `
     <div class="card"><div class="num">${stats.total}</div><div class="label">Total hoje</div></div>
-    <div class="card"><div class="num ok">${ps.autorizado || 0}</div><div class="label">Autorizado</div></div>
+    <div class="card"><div class="num ok">${ps.autorizado || 0}</div><div class="label">Base atualizada</div></div>
     <div class="card"><div class="num warn">${ps.falha || 0}</div><div class="label">Falha</div></div>
     <div class="card"><div class="num warn">${ps.sem_retorno || 0}</div><div class="label">Sem retorno</div></div>
     <div class="card"><div class="num warn">${ps.rate_limit || 0}</div><div class="label">Rate limit (espaçamento)</div></div>
@@ -205,6 +218,32 @@ async function carregar() {
       <td>${hora}</td>
     </tr>`;
   }
+}
+
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function carregarFunil() {
+  try {
+    const f = await fetch('/admin/funil').then(r => r.json());
+    const pr = f.por_resultado || {};
+    const taxa = f.taxa_pre_aprovacao_pct == null ? '-' : f.taxa_pre_aprovacao_pct + '%';
+    const brl = v => v == null ? '-' : 'R$ ' + Number(v).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById('funilCards').innerHTML = `
+      <div class="card"><div class="num">${f.entraram}</div><div class="label">Entraram</div></div>
+      <div class="card"><div class="num ok">${f.base_atualizada}</div><div class="label">Base atualizada</div></div>
+      <div class="card"><div class="num ok">${f.pre_aprovados}</div><div class="label">Pré-aprovados</div></div>
+      <div class="card"><div class="num">${taxa}</div><div class="label">Taxa de pré-aprovação</div></div>
+      <div class="card"><div class="num warn">${pr.NAO_APROVADO || 0}</div><div class="label">Não aprovados</div></div>
+      <div class="card"><div class="num err">${pr.FALHA_CONSULTA || 0}</div><div class="label">Falha na consulta</div></div>
+      <div class="card"><div class="num">${f.sem_resultado_ainda}</div><div class="label">Sem resultado do fluxo</div></div>
+      <div class="card"><div class="num" style="font-size:20px;">${brl(f.valor_liquido_medio_pre_aprovados)}</div><div class="label">Líquido médio (pré-aprov.)</div></div>
+      <div class="card"><div class="num" style="font-size:20px;">${brl(f.margem_media_pre_aprovados)}</div><div class="label">Margem média (pré-aprov.)</div></div>
+    `;
+    const tb = document.querySelector('#tabelaMotivos tbody');
+    tb.innerHTML = (f.motivos || []).map(m =>
+      `<tr><td>${esc(m.resultado)}</td><td>${esc(m.motivo)}</td><td>${m.qtd}</td></tr>`).join('')
+      || '<tr><td colspan="3" style="color:#777;">Sem resultados ainda</td></tr>';
+  } catch (e) { /* painel segue funcionando sem o funil */ }
 }
 
 async function criarEquipe() {

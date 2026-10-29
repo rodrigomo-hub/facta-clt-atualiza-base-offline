@@ -104,6 +104,23 @@ class SimularRequest(BaseModel):
         return v
 
 
+class ResultadoFluxoRequest(BaseModel):
+    """Resultado final que o fluxo (n8n) reporta de volta para um job."""
+    job_id: str = Field(..., min_length=4, max_length=64)
+    resultado: str = Field(..., min_length=2, max_length=40)  # PRE_APROVADO | NAO_APROVADO | FALHA_CONSULTA | ...
+    motivo: Optional[str] = Field(None, max_length=200)
+    banco: Optional[str] = Field(None, max_length=80)
+    margem: Optional[float] = None
+    valor_liquido_max: Optional[float] = None
+    detalhes: Optional[dict] = None
+
+    @field_validator("resultado")
+    @classmethod
+    def _normaliza(cls, v: str) -> str:
+        v = re.sub(r"[^A-Z0-9_]", "_", v.strip().upper())
+        return v or "DESCONHECIDO"
+
+
 class NovaEquipeRequest(BaseModel):
     nome: str
 
@@ -302,6 +319,36 @@ async def saldo_proxy_config(payload: SaldoProxyConfigRequest, _admin: bool = De
 @app.get("/admin/stats/hoje")
 async def stats_hoje(equipe: str | None = None, _admin: bool = Depends(exigir_admin)):
     return database.stats_hoje(equipe)
+
+
+@app.post("/resultado")
+async def registrar_resultado_fluxo(
+    payload: ResultadoFluxoRequest,
+    x_team_key: Optional[str] = Header(None, alias="X-Team-Key"),
+):
+    """
+    Chamado pelo fluxo do n8n ao terminar, com o desfecho (pre-aprovado, nao
+    aprovado + motivo, falha...). A autorizacao e o proprio job_id (aleatorio,
+    so conhecido por quem recebeu o webhook). Se X-Team-Key vier, tem que ser
+    da equipe dona do job.
+    """
+    req = database.get_requisicao_por_job(payload.job_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="job_id nao encontrado")
+    if x_team_key:
+        equipe = database.get_equipe(x_team_key)
+        if not equipe or equipe["nome"] != req["equipe"]:
+            raise HTTPException(status_code=403, detail="X-Team-Key nao pertence a equipe do job")
+    database.registrar_resultado(
+        payload.job_id, payload.resultado, payload.motivo, payload.banco,
+        payload.margem, payload.valor_liquido_max, payload.detalhes,
+    )
+    return {"ok": True, "job_id": payload.job_id, "resultado": payload.resultado}
+
+
+@app.get("/admin/funil")
+async def funil_hoje(equipe: str | None = None, _admin: bool = Depends(exigir_admin)):
+    return database.stats_funil_hoje(equipe)
 
 
 @app.get("/admin/capacidade")

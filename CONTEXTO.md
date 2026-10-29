@@ -161,3 +161,12 @@ curl -s https://factaclt.automacaofintech.digital/admin/capacidade | python3 -m 
 - Considerar se vale a pena tornar o ambiente local um serviço persistente
   do Windows (NSSM ou Task Scheduler) em vez de terminal manual, caso
   continue em uso além de teste pontual.
+
+## 12. Resultado do fluxo (n8n) + funil de metricas + regras de entrega do webhook
+
+- **"Base atualizada"** (antes "Autorizado" no painel): `status=autorizado` no banco = a Facta respondeu com dado. NAO significa pre-aprovado. A aprovacao real e decidida no fluxo n8n.
+- **`POST /resultado`** (sem Basic Auth; a "senha" e o `job_id`, que so quem recebeu o webhook conhece; `X-Team-Key` opcional, se enviada tem que ser da equipe dona do job). Body: `job_id`, `resultado` (PRE_APROVADO | NAO_APROVADO | FALHA_CONSULTA | APROVADO_SEM_SIMULACAO ...), `motivo`, `banco`, `margem`, `valor_liquido_max`, `detalhes`. Upsert por job (tabela `resultados_fluxo`); 404 se o job nao existe.
+- **`GET /admin/funil?equipe=`**: entraram, base atualizada, com/sem resultado do fluxo, por resultado, pre-aprovados, taxa, margem media, liquido medio/maximo, motivos, por equipe (dia de Brasilia). Painel: secao "Funil de resultado (hoje)".
+- **Entrega do webhook** (`queue_worker._enviar_webhook`): timeout de leitura `WEBHOOK_TIMEOUT_SEGUNDOS` (default 60). Leitura estourou -> considerado entregue (aviso em `ultimo_erro`), NAO reenvia (evita rodar o fluxo 2x). Retry so em erro de conexao e HTTP 408/425/429/502/503/504. Outros non-2xx (500, 404...) -> `falhou` na hora (reenvio manual em `/admin/webhooks/reenviar`). `webhooks.status_http` e `webhooks.resposta` guardam o retorno do destino.
+- Fluxo pronto: `n8n/retorno_com_metricas.json` (token do painel esteira e placeholder; `$('')` corrigido; nos "Reportar Resultado - *" em cada termino; Respond no caminho de ofertas).
+- Testes (fora do repo): test_resultado.py (15), test_webhook.py (37).

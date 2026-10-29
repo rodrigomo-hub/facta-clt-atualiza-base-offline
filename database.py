@@ -120,6 +120,29 @@ def init_db():
                 entregue_em TEXT
             )
         """)
+        colunas_wh = [r["name"] for r in conn.execute("PRAGMA table_info(webhooks)").fetchall()]
+        if "status_http" not in colunas_wh:
+            conn.execute("ALTER TABLE webhooks ADD COLUMN status_http INTEGER")
+        if "resposta" not in colunas_wh:
+            conn.execute("ALTER TABLE webhooks ADD COLUMN resposta TEXT")
+        # Resultado FINAL do fluxo do n8n (pre-aprovado, nao aprovado + motivo,
+        # falha...) reportado de volta via POST /resultado. Uma linha por job.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS resultados_fluxo (
+                job_id TEXT PRIMARY KEY,
+                req_id INTEGER,
+                equipe TEXT,
+                cpf TEXT,
+                resultado TEXT NOT NULL,
+                motivo TEXT,
+                banco TEXT,
+                margem REAL,
+                valor_liquido_max REAL,
+                detalhes_json TEXT,
+                criado_em TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_resultados_criado ON resultados_fluxo(criado_em)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_status ON webhooks(status, proximo_envio)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_req ON webhooks(req_id)")
         # Fotos periodicas do saldo de trafego do proxy (API do provedor) -
@@ -499,39 +522,47 @@ def webhooks_para_enviar(limite: int = 50) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def marcar_webhook_entregue(webhook_id: int):
+def marcar_webhook_entregue(webhook_id: int, obs: Optional[str] = None,
+                            status_http: Optional[int] = None, resposta: Optional[str] = None):
+    """`obs` guarda um aviso (ex: entregue sem confirmacao por timeout) em ultimo_erro."""
     with get_conn() as conn:
         conn.execute(
             "UPDATE webhooks SET status = 'entregue', entregue_em = ?, tentativas = tentativas + 1, "
-            "ultimo_erro = NULL WHERE id = ?",
-            (datetime.utcnow().isoformat(), webhook_id),
+            "ultimo_erro = ?, status_http = ?, resposta = ? WHERE id = ?",
+            (datetime.utcnow().isoformat(), obs, status_http, (resposta or "")[:1000] or None, webhook_id),
         )
 
 
-def marcar_webhook_falha(webhook_id: int, erro: str):
-    """Registra a falha; reagenda com backoff ou marca 'falhou' ao esgotar as tentativas."""
+def marcar_webhook_falha(webhook_id: int, erro: str, definitivo: bool = False,
+                         status_http: Optional[int] = None, resposta: Optional[str] = None):
+    """
+    Registra a falha. Reagenda com backoff, ou marca 'falhou' ao esgotar as
+    tentativas OU quando `definitivo` (erro que reenviar nao resolve e pode
+    rodar o fluxo do destino de novo - ex: HTTP 500 do n8n).
+    """
+    resposta = (resposta or "")[:1000] or None
     with get_conn() as conn:
         row = conn.execute("SELECT tentativas FROM webhooks WHERE id = ?", (webhook_id,)).fetchone()
         if not row:
             return
         tentativas = row["tentativas"] + 1
-        if tentativas >= MAX_TENTATIVAS_WEBHOOK:
+        if definitivo or tentativas >= MAX_TENTATIVAS_WEBHOOK:
             conn.execute(
-                "UPDATE webhooks SET status = 'falhou', tentativas = ?, ultimo_erro = ? WHERE id = ?",
-                (tentativas, erro[:300], webhook_id),
+                "UPDATE webhooks SET status = 'falhou', tentativas = ?, ultimo_erro = ?, status_http = ?, resposta = ? WHERE id = ?",
+                (tentativas, erro[:300], status_http, resposta, webhook_id),
             )
         else:
             espera = BACKOFF_WEBHOOK_SEGUNDOS[tentativas - 1]
             proximo = (datetime.utcnow() + timedelta(seconds=espera)).isoformat()
             conn.execute(
-                "UPDATE webhooks SET tentativas = ?, ultimo_erro = ?, proximo_envio = ? WHERE id = ?",
-                (tentativas, erro[:300], proximo, webhook_id),
+                "UPDATE webhooks SET tentativas = ?, ultimo_erro = ?, proximo_envio = ?, status_http = ?, resposta = ? WHERE id = ?",
+                (tentativas, erro[:300], proximo, status_http, resposta, webhook_id),
             )
 
 
 def listar_webhooks(status: Optional[str] = None, limite: int = 50) -> list[dict]:
     with get_conn() as conn:
-        query = "SELECT id, req_id, job_id, url, ref, status, tentativas, ultimo_erro, proximo_envio, criado_em, entregue_em FROM webhooks"
+        query = "SELECT id, req_id, job_id, url, ref, status, tentativas, ultimo_erro, status_http, resposta, proximo_envio, criado_em, entregue_em FROM webhooks"
         params: list = []
         if status:
             query += " WHERE status = ?"
@@ -601,3 +632,102 @@ def contar_requisicoes_proxy_desde(desde_iso: str) -> int:
             "SELECT COUNT(*) AS n FROM requisicoes WHERE usou_proxy = 1 AND finalizado_em >= ?", (desde_iso,)
         ).fetchone()
         return row["n"] or 0
+
+
+
+# ------------------------------------------------------------------
+# Resultado final do fluxo (n8n -> POST /resultado) e funil do painel
+# ------------------------------------------------------------------
+
+def registrar_resultado(
+    job_id: str, resultado: str, motivo: Optional[str] = None, banco: Optional[str] = None,
+    margem: Optional[float] = None, valor_liquido_max: Optional[float] = None,
+    detalhes: Optional[dict] = None,
+) -> Optional[dict]:
+    """Grava (ou substitui) o resultado do job. Devolve a requisicao ou None se o job nao existe."""
+    req = get_requisicao_por_job(job_id)
+    if not req:
+        return None
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO resultados_fluxo (job_id, req_id, equipe, cpf, resultado, motivo, banco, margem, "
+            "valor_liquido_max, detalhes_json, criado_em) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(job_id) DO UPDATE SET resultado=excluded.resultado, motivo=excluded.motivo, "
+            "banco=excluded.banco, margem=excluded.margem, valor_liquido_max=excluded.valor_liquido_max, "
+            "detalhes_json=excluded.detalhes_json, criado_em=excluded.criado_em",
+            (
+                job_id, req["id"], req["equipe"], req["cpf"], resultado, motivo, banco, margem, valor_liquido_max,
+                json.dumps(detalhes, ensure_ascii=False, default=str)[:4000] if detalhes else None,
+                datetime.utcnow().isoformat(),
+            ),
+        )
+    return req
+
+
+def stats_funil_hoje(equipe: Optional[str] = None) -> dict:
+    """
+    Funil do dia (horario de Brasilia): CPFs que entraram -> base atualizada ->
+    resultado final do fluxo (pre-aprovado / nao aprovado por motivo / falha).
+    """
+    inicio, fim = _limites_dia_br_em_utc()
+    filtro_eq = " AND equipe = ?" if equipe else ""
+    p_eq = [equipe] if equipe else []
+    with get_conn() as conn:
+        entraram = conn.execute(
+            f"SELECT COUNT(*) AS n FROM requisicoes WHERE criado_em >= ? AND criado_em < ?{filtro_eq}",
+            [inicio, fim] + p_eq,
+        ).fetchone()["n"]
+        base_atualizada = conn.execute(
+            f"SELECT COUNT(*) AS n FROM requisicoes WHERE criado_em >= ? AND criado_em < ? AND status = 'autorizado'{filtro_eq}",
+            [inicio, fim] + p_eq,
+        ).fetchone()["n"]
+        # Base atualizada hoje mas o fluxo ainda nao reportou resultado (em andamento ou fluxo falhou)
+        sem_resultado = conn.execute(
+            "SELECT COUNT(*) AS n FROM requisicoes r WHERE r.criado_em >= ? AND r.criado_em < ? AND r.status = 'autorizado' "
+            f"AND NOT EXISTS (SELECT 1 FROM resultados_fluxo f WHERE f.job_id = r.job_id){filtro_eq.replace('equipe', 'r.equipe')}",
+            [inicio, fim] + p_eq,
+        ).fetchone()["n"]
+        rows = conn.execute(
+            f"SELECT resultado, motivo, COUNT(*) AS n FROM resultados_fluxo WHERE criado_em >= ? AND criado_em < ?{filtro_eq} "
+            "GROUP BY resultado, motivo ORDER BY n DESC",
+            [inicio, fim] + p_eq,
+        ).fetchall()
+        pre = conn.execute(
+            "SELECT COUNT(*) AS n, AVG(margem) AS margem_media, AVG(valor_liquido_max) AS valor_medio, "
+            f"MAX(valor_liquido_max) AS valor_max FROM resultados_fluxo WHERE criado_em >= ? AND criado_em < ? "
+            f"AND resultado = 'PRE_APROVADO'{filtro_eq}",
+            [inicio, fim] + p_eq,
+        ).fetchone()
+        por_equipe = conn.execute(
+            "SELECT equipe, resultado, COUNT(*) AS n FROM resultados_fluxo WHERE criado_em >= ? AND criado_em < ? "
+            f"{filtro_eq} GROUP BY equipe, resultado",
+            [inicio, fim] + p_eq,
+        ).fetchall()
+
+    por_resultado: dict = {}
+    motivos: dict = {}
+    for r in rows:
+        por_resultado[r["resultado"]] = por_resultado.get(r["resultado"], 0) + r["n"]
+        if r["resultado"] != "PRE_APROVADO":
+            chave = f"{r['resultado']}|{r['motivo'] or 'sem_motivo'}"
+            motivos[chave] = {"resultado": r["resultado"], "motivo": r["motivo"] or "sem_motivo", "qtd": r["n"]}
+    total_resultados = sum(por_resultado.values())
+    pre_n = pre["n"] or 0
+    eq: dict = {}
+    for r in por_equipe:
+        eq.setdefault(r["equipe"], {})[r["resultado"]] = r["n"]
+    return {
+        "data": datetime.now(FUSO_BR).date().isoformat(),
+        "entraram": entraram,
+        "base_atualizada": base_atualizada,
+        "com_resultado": total_resultados,
+        "sem_resultado_ainda": sem_resultado,
+        "por_resultado": por_resultado,
+        "pre_aprovados": pre_n,
+        "taxa_pre_aprovacao_pct": round(pre_n / total_resultados * 100, 1) if total_resultados else None,
+        "margem_media_pre_aprovados": round(pre["margem_media"], 2) if pre["margem_media"] is not None else None,
+        "valor_liquido_medio_pre_aprovados": round(pre["valor_medio"], 2) if pre["valor_medio"] is not None else None,
+        "valor_liquido_maximo": round(pre["valor_max"], 2) if pre["valor_max"] is not None else None,
+        "motivos": sorted(motivos.values(), key=lambda m: -m["qtd"]),
+        "por_equipe": eq,
+    }
