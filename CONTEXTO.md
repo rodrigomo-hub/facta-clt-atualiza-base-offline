@@ -67,6 +67,38 @@ real acontecendo, e os jobs novos ficam presos atrás dos zumbis na fila.
 **Sempre reiniciar o serviço logo após limpar o banco** para manter memória
 e banco sincronizados.
 
+### 9. Cloudflare barra IP de datacenter E o cliente Python (out/2026)
+O Cloudflare da Facta passou a devolver 403 "Just a moment" em dois casos
+independentes: (a) qualquer IP de datacenter (VPS) — nem curl passa direto;
+(b) o handshake TLS do `httpx`, mesmo saindo por proxy residencial. Por isso
+o cliente HTTP agora e `curl_cffi` com `impersonate` (default `chrome120`,
+env `FACTA_IMPERSONATE`) e o proxy residencial e **obrigatorio**: com o
+proxy desligado/incompleto tudo da `bloqueio_ip`. O fallback direto quando
+o proxy da erro nao adianta mais. Na VPS (Docker) `curl_cffi` vem pelo
+requirements.txt.
+
+### 10. Fila persistida e webhook de retorno
+- A fila agora vive no banco: no boot, `na_fila` e `processando` voltam para
+  a fila (mesma prioridade/tentativas/ref). Restart/deploy nao perde mais job.
+  Limpar o banco continua exigindo parar o servico antes (secao 8).
+- `POST /simular_facta_clt` aceita `webhook_url` e `ref` opcionais. Responde
+  na hora com `job_id`; quando o CPF termina, o servico faz POST do resultado
+  na URL: `{job_id, ref, cpf, status ok|falha, uuid, tentativa, resultado,
+  tipo_erro, detalhe_erro, resultado_completo}`. `ref` volta igual ao enviado.
+- Entrega com retry (5 tentativas: 5s, 30s, 2min, 10min, 1h), timeout de 10s,
+  sem assinatura. Outbox persistida na tabela `webhooks` (sobrevive a restart).
+  Acompanhar/reenviar: `GET /admin/webhooks?status=falhou`,
+  `POST /admin/webhooks/reenviar`.
+- CPF duplicado na fila: todos os chamadores com webhook sao avisados; a
+  Facta e consultada uma vez so.
+- `webhook_url` interna (localhost, IP privado, `.internal`) e recusada (SSRF);
+  `WEBHOOK_PERMITIR_REDE_PRIVADA=true` libera.
+- `GET /job/{id}` e `/simular_facta_clt/aguardar` continuam funcionando.
+  Job finalizado sai da memoria apos 10 min e passa a ser lido do banco
+  (so `uuid`, sem o `resultado` completo).
+- Reduzir a concorrencia nao cancela mais job em andamento: o worker termina
+  o job atual e so entao sai (antes deixava zumbi em `processando`).
+
 ## Ambientes ativos
 
 - **VPS produção:** `https://factaclt.automacaofintech.digital`

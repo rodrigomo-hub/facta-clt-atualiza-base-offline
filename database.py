@@ -90,6 +90,38 @@ def init_db():
             conn.execute("ALTER TABLE requisicoes ADD COLUMN usou_proxy INTEGER NOT NULL DEFAULT 0")
         if "caiu_para_direto" not in colunas:
             conn.execute("ALTER TABLE requisicoes ADD COLUMN caiu_para_direto INTEGER NOT NULL DEFAULT 0")
+        # Fila persistida: o que foi pedido (tentativas/prioridade) precisa
+        # sobreviver a restart para o job poder ser recolocado na fila no boot.
+        if "tentativas_max" not in colunas:
+            conn.execute("ALTER TABLE requisicoes ADD COLUMN tentativas_max INTEGER NOT NULL DEFAULT 5")
+        if "prioridade" not in colunas:
+            conn.execute("ALTER TABLE requisicoes ADD COLUMN prioridade INTEGER NOT NULL DEFAULT 0")
+        if "ref" not in colunas:
+            conn.execute("ALTER TABLE requisicoes ADD COLUMN ref TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_requisicoes_status ON requisicoes(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_requisicoes_job_id ON requisicoes(job_id)")
+        # Outbox de webhooks de retorno: uma linha por (job, url). Fica em
+        # 'aguardando' ate o job terminar, vira 'pendente' com o payload
+        # pronto e o entregador faz POST com retry. Persistido para nao
+        # perder aviso em restart.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS webhooks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                req_id INTEGER NOT NULL,
+                job_id TEXT NOT NULL,
+                url TEXT NOT NULL,
+                ref TEXT,
+                status TEXT NOT NULL DEFAULT 'aguardando',
+                payload_json TEXT,
+                tentativas INTEGER NOT NULL DEFAULT 0,
+                ultimo_erro TEXT,
+                proximo_envio TEXT,
+                criado_em TEXT NOT NULL,
+                entregue_em TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_status ON webhooks(status, proximo_envio)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_req ON webhooks(req_id)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS config (
                 chave TEXT PRIMARY KEY,
@@ -210,12 +242,15 @@ def atualizar_prioridade_equipe(api_key: str, prioridade: int):
         )
 
 
-def registrar_requisicao_criada(equipe: str, cpf: str, job_id: str) -> int:
+def registrar_requisicao_criada(
+    equipe: str, cpf: str, job_id: str,
+    tentativas_max: int = 5, prioridade: int = 0, ref: Optional[str] = None,
+) -> int:
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO requisicoes (equipe, cpf, status, job_id, criado_em) "
-            "VALUES (?, ?, 'na_fila', ?, ?)",
-            (equipe, cpf, job_id, datetime.utcnow().isoformat()),
+            "INSERT INTO requisicoes (equipe, cpf, status, job_id, criado_em, tentativas_max, prioridade, ref) "
+            "VALUES (?, ?, 'na_fila', ?, ?, ?, ?, ?)",
+            (equipe, cpf, job_id, datetime.utcnow().isoformat(), tentativas_max, prioridade, ref),
         )
         return cur.lastrowid
 
@@ -340,3 +375,169 @@ def ultimas_requisicoes(limite: int = 50, equipe: Optional[str] = None) -> list[
         params.append(limite)
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
+
+
+
+# ------------------------------------------------------------------
+# Fila persistida - recuperacao no boot
+# ------------------------------------------------------------------
+
+def listar_pendentes_fila() -> list[dict]:
+    """Jobs que ainda nao terminaram (na_fila ou processando), na ordem de chegada."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, equipe, cpf, job_id, tentativas_max, prioridade, ref "
+            "FROM requisicoes WHERE status IN ('na_fila', 'processando') ORDER BY id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def voltar_processando_para_fila() -> int:
+    """No boot: o que estava 'processando' morreu junto com o processo anterior."""
+    with get_conn() as conn:
+        cur = conn.execute("UPDATE requisicoes SET status = 'na_fila' WHERE status = 'processando'")
+        return cur.rowcount
+
+
+def get_requisicao_por_job(job_id: str) -> Optional[dict]:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM requisicoes WHERE job_id = ?", (job_id,)).fetchone()
+        return dict(row) if row else None
+
+
+# ------------------------------------------------------------------
+# Webhooks de retorno (outbox)
+# ------------------------------------------------------------------
+
+BACKOFF_WEBHOOK_SEGUNDOS = (5, 30, 120, 600, 3600)  # 5 tentativas no total
+MAX_TENTATIVAS_WEBHOOK = len(BACKOFF_WEBHOOK_SEGUNDOS)
+
+
+def adicionar_webhook(req_id: int, job_id: str, url: str, ref: Optional[str]) -> Optional[int]:
+    """Registra um callback para o job. Ignora duplicata exata (mesmo job+url+ref)."""
+    with get_conn() as conn:
+        existe = conn.execute(
+            "SELECT id FROM webhooks WHERE req_id = ? AND url = ? AND COALESCE(ref, '') = COALESCE(?, '')",
+            (req_id, url, ref),
+        ).fetchone()
+        if existe:
+            return None
+        cur = conn.execute(
+            "INSERT INTO webhooks (req_id, job_id, url, ref, status, criado_em) "
+            "VALUES (?, ?, ?, ?, 'aguardando', ?)",
+            (req_id, job_id, url, ref, datetime.utcnow().isoformat()),
+        )
+        return cur.lastrowid
+
+
+def liberar_webhooks(req_id: int, payload_base: dict) -> int:
+    """Job terminou: monta o payload de cada webhook aguardando e marca como pendente de envio."""
+    agora = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, ref FROM webhooks WHERE req_id = ? AND status = 'aguardando'", (req_id,)
+        ).fetchall()
+        for r in rows:
+            payload = {**payload_base, "ref": r["ref"]}
+            conn.execute(
+                "UPDATE webhooks SET status = 'pendente', payload_json = ?, proximo_envio = ? WHERE id = ?",
+                (json.dumps(payload, ensure_ascii=False, default=str), agora, r["id"]),
+            )
+        return len(rows)
+
+
+def liberar_webhooks_orfaos() -> int:
+    """
+    Boot: webhooks ainda 'aguardando' cujo job ja foi finalizado no banco
+    (processo caiu entre finalizar_requisicao e liberar_webhooks). Monta o
+    payload a partir da linha da requisicao (versao resumida: so uuid).
+    """
+    with get_conn() as conn:
+        reqs = conn.execute(
+            "SELECT DISTINCT r.* FROM requisicoes r JOIN webhooks w ON w.req_id = r.id "
+            "WHERE w.status = 'aguardando' AND r.status NOT IN ('na_fila', 'processando')"
+        ).fetchall()
+    total = 0
+    for r in reqs:
+        r = dict(r)
+        resumo = json.loads(r["resultado_resumo"]) if r.get("resultado_resumo") else {}
+        ok = r["status"] == "autorizado"
+        base = {
+            "job_id": r["job_id"], "cpf": r["cpf"], "status": "ok" if ok else "falha",
+            "uuid": resumo.get("uuid"), "resultado": None,
+            "tipo_erro": r.get("tipo_erro"), "detalhe_erro": r.get("detalhe_erro"),
+            "resultado_completo": False,
+        }
+        total += liberar_webhooks(r["id"], base)
+    return total
+
+
+def webhooks_para_enviar(limite: int = 50) -> list[dict]:
+    agora = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM webhooks WHERE status = 'pendente' AND proximo_envio <= ? "
+            "ORDER BY proximo_envio LIMIT ?",
+            (agora, limite),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def marcar_webhook_entregue(webhook_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE webhooks SET status = 'entregue', entregue_em = ?, tentativas = tentativas + 1, "
+            "ultimo_erro = NULL WHERE id = ?",
+            (datetime.utcnow().isoformat(), webhook_id),
+        )
+
+
+def marcar_webhook_falha(webhook_id: int, erro: str):
+    """Registra a falha; reagenda com backoff ou marca 'falhou' ao esgotar as tentativas."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT tentativas FROM webhooks WHERE id = ?", (webhook_id,)).fetchone()
+        if not row:
+            return
+        tentativas = row["tentativas"] + 1
+        if tentativas >= MAX_TENTATIVAS_WEBHOOK:
+            conn.execute(
+                "UPDATE webhooks SET status = 'falhou', tentativas = ?, ultimo_erro = ? WHERE id = ?",
+                (tentativas, erro[:300], webhook_id),
+            )
+        else:
+            espera = BACKOFF_WEBHOOK_SEGUNDOS[tentativas - 1]
+            proximo = (datetime.utcnow() + timedelta(seconds=espera)).isoformat()
+            conn.execute(
+                "UPDATE webhooks SET tentativas = ?, ultimo_erro = ?, proximo_envio = ? WHERE id = ?",
+                (tentativas, erro[:300], proximo, webhook_id),
+            )
+
+
+def listar_webhooks(status: Optional[str] = None, limite: int = 50) -> list[dict]:
+    with get_conn() as conn:
+        query = "SELECT id, req_id, job_id, url, ref, status, tentativas, ultimo_erro, proximo_envio, criado_em, entregue_em FROM webhooks"
+        params: list = []
+        if status:
+            query += " WHERE status = ?"
+            params.append(status)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limite)
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def contar_webhooks() -> dict:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT status, COUNT(*) AS qtd FROM webhooks GROUP BY status").fetchall()
+        return {r["status"]: r["qtd"] for r in rows}
+
+
+def reenviar_webhooks_falhos() -> int:
+    """Recoloca os 'falhou' na fila de envio (zera tentativas)."""
+    agora = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE webhooks SET status = 'pendente', tentativas = 0, proximo_envio = ? "
+            "WHERE status = 'falhou' AND payload_json IS NOT NULL",
+            (agora,),
+        )
+        return cur.rowcount

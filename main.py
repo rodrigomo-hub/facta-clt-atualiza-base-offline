@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 import database
-from queue_worker import fila_global
+from queue_worker import fila_global, validar_url_webhook
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("main")
@@ -79,6 +79,19 @@ async def exigir_admin(credentials: HTTPBasicCredentials = Depends(_security)):
 class SimularRequest(BaseModel):
     cpf: str = Field(..., description="CPF do cliente, somente numeros")
     tentativas: int = Field(default=5, ge=1, le=10)
+    # Retorno por webhook: o servico responde na hora com o job_id e, quando
+    # o CPF terminar de processar, faz POST do resultado nessa URL (sem o
+    # chamador ficar esperando). `ref` e devolvido igual no retorno, para
+    # ligar a resposta ao lead de quem chamou.
+    webhook_url: Optional[str] = Field(default=None, description="URL que recebe o resultado por POST")
+    ref: Optional[str] = Field(default=None, max_length=200, description="Texto livre devolvido no webhook")
+
+    @field_validator("webhook_url")
+    @classmethod
+    def valida_webhook(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
+        return validar_url_webhook(v)
 
     @field_validator("cpf")
     @classmethod
@@ -131,25 +144,23 @@ async def simular_facta_clt(payload: SimularRequest, equipe: dict = Depends(get_
     job_id, ja_existia = await fila_global.enfileirar(
         equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas,
         prioridade=equipe.get("prioridade", 0),
+        webhook_url=payload.webhook_url, ref=payload.ref,
     )
     return {
         "job_id": job_id,
         "status": "na_fila" if not ja_existia else "ja_estava_na_fila",
         "posicao_fila": fila_global.tamanho_fila(),
         "duplicata_evitada": ja_existia,
+        "webhook_registrado": bool(payload.webhook_url),
     }
 
 
 @app.get("/job/{job_id}")
 async def status_job(job_id: str, equipe: dict = Depends(get_equipe_atual)):
-    job = fila_global.get_job(job_id)
-    if not job:
+    info = fila_global.consultar_job(job_id)
+    if not info:
         raise HTTPException(status_code=404, detail="job_id nao encontrado")
-    return {
-        "job_id": job.job_id,
-        "status": job.status,
-        "resultado": job.resultado,
-    }
+    return info
 
 
 @app.post("/simular_facta_clt/aguardar")
@@ -163,6 +174,7 @@ async def simular_facta_clt_aguardar(
     job_id, _ja_existia = await fila_global.enfileirar(
         equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas,
         prioridade=equipe.get("prioridade", 0),
+        webhook_url=payload.webhook_url, ref=payload.ref,
     )
     job = fila_global.get_job(job_id)
     try:
@@ -282,6 +294,18 @@ async def capacidade(_admin: bool = Depends(exigir_admin)):
         "total_jobs_processados_hoje": capacidade_hoje["total_jobs_processados_hoje"],
         "tamanho_fila_atual": fila_global.tamanho_fila(),
     }
+
+
+@app.get("/admin/webhooks")
+async def listar_webhooks(status: str | None = None, limite: int = 50, _admin: bool = Depends(exigir_admin)):
+    """Outbox de webhooks de retorno. status: aguardando | pendente | entregue | falhou."""
+    return {"contagem": database.contar_webhooks(), "webhooks": database.listar_webhooks(status, limite)}
+
+
+@app.post("/admin/webhooks/reenviar")
+async def reenviar_webhooks(_admin: bool = Depends(exigir_admin)):
+    """Recoloca na fila de envio os webhooks que esgotaram as tentativas ('falhou')."""
+    return {"reenfileirados": database.reenviar_webhooks_falhos()}
 
 
 @app.get("/admin/requisicoes")
