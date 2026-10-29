@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 import database
+import proxy_saldo
 from queue_worker import fila_global, validar_url_webhook
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -24,6 +25,7 @@ app = FastAPI(title="Facta CLT Simulador API", version="2.0.0")
 async def startup():
     database.init_db()
     await fila_global.iniciar()
+    app.state.monitor_saldo = asyncio.create_task(proxy_saldo.monitor())
     logger.info("API iniciada.")
 
 
@@ -118,6 +120,21 @@ class ConcorrenciaRequest(BaseModel):
     # limit. Subir o teto de workers compensa essa latencia mantendo
     # throughput agregado alto.
     concorrencia: int = Field(..., ge=1, le=150)
+
+
+class SaldoProxyConfigRequest(BaseModel):
+    # Campos None = nao mexe. api_key vazia e ignorada (nao apaga a salva).
+    api_key: Optional[str] = None
+    alerta_mb: Optional[float] = Field(default=None, ge=0)
+    preco_gb: Optional[float] = Field(default=None, ge=0)
+    alerta_webhook_url: Optional[str] = None  # "" limpa
+
+    @field_validator("alerta_webhook_url")
+    @classmethod
+    def valida_alerta_webhook(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v if v is None else ""
+        return validar_url_webhook(v)
 
 
 class ProxyConfigRequest(BaseModel):
@@ -257,6 +274,30 @@ async def set_config_proxy(payload: ProxyConfigRequest, _admin: bool = Depends(e
 # ============================================================
 # ENDPOINTS - STATS / DASHBOARD
 # ============================================================
+
+@app.get("/admin/proxy/saldo")
+async def saldo_proxy(atualizar: bool = False, _admin: bool = Depends(exigir_admin)):
+    """
+    Saldo de trafego do proxy (API do Proxy-Seller) + estimativas de consumo,
+    dias restantes e custo. `?atualizar=true` consulta a API agora; sem isso
+    devolve a ultima foto (o monitor atualiza de hora em hora).
+    """
+    consulta = await proxy_saldo.atualizar_saldo() if atualizar else None
+    out = proxy_saldo.resumo()
+    out["config"] = proxy_saldo.get_cfg_publico()
+    if consulta is not None:
+        out["consulta_agora"] = {k: v for k, v in consulta.items() if k in ("ok", "motivo")}
+    return out
+
+
+@app.post("/admin/proxy/saldo/config")
+async def saldo_proxy_config(payload: SaldoProxyConfigRequest, _admin: bool = Depends(exigir_admin)):
+    proxy_saldo.set_cfg(
+        api_key=payload.api_key, alerta_mb=payload.alerta_mb,
+        preco_gb=payload.preco_gb, alerta_webhook=payload.alerta_webhook_url,
+    )
+    return proxy_saldo.get_cfg_publico()
+
 
 @app.get("/admin/stats/hoje")
 async def stats_hoje(equipe: str | None = None, _admin: bool = Depends(exigir_admin)):

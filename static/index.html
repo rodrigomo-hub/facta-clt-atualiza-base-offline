@@ -121,6 +121,24 @@
   </section>
 
   <section>
+    <div class="section-title">Saldo do proxy (tráfego)</div>
+    <div id="saldoStatus" style="margin-bottom:10px; font-size:13px;"></div>
+    <div style="background:#1a1d24; border:1px solid #2a2d35; border-radius:6px; height:10px; margin-bottom:12px; overflow:hidden;">
+      <div id="saldoBarra" style="height:100%; width:0%; background:#4ade80;"></div>
+    </div>
+    <div class="cards" id="saldoCards"></div>
+    <div class="config-row" style="flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+      <input type="password" id="saldoKeyInput" placeholder="API key Proxy-Seller (vazio = manter)" style="width:280px;">
+      <input type="number" id="saldoAlertaInput" placeholder="alerta MB" min="0" step="50" style="width:110px;" title="Avisar quando restar menos que X MB">
+      <input type="number" id="saldoPrecoInput" placeholder="preço/GB" min="0" step="0.01" style="width:110px;" title="Preço por GB, para estimar custo">
+      <input type="text" id="saldoWebhookInput" placeholder="webhook do alerta (n8n)" style="width:300px;">
+      <button onclick="salvarSaldoConfig()">Salvar</button>
+      <button onclick="carregarSaldo(true)">Atualizar agora</button>
+    </div>
+    <div id="saldoObs" style="color:#777; font-size:12px;"></div>
+  </section>
+
+  <section>
     <div class="section-title">Por equipe (hoje)</div>
     <table id="tabelaEquipes">
       <thead><tr><th>Equipe</th><th>Autorizado</th><th>Falha</th><th>Sem retorno</th><th>Rate limit</th><th>Bloqueio IP</th><th>Na fila</th><th>Processando</th><th>Total</th></tr></thead>
@@ -261,21 +279,25 @@ async function carregarProxy() {
   document.getElementById('proxyPassInput').value = '';
 
   const statusDiv = document.getElementById('proxyStatus');
-  if (cfg.usar_proxy) {
-    statusDiv.innerHTML = `<span class="proxy-on">● Proxy ligado</span> — ${cfg.proxy_host}:${cfg.proxy_port}` +
-      (cfg.proxy_pass_configurada ? '' : ' <span class="proxy-off">(senha não configurada!)</span>');
+  const incompleto = !(cfg.proxy_host && cfg.proxy_port && cfg.proxy_user && cfg.proxy_pass_configurada);
+  if (cfg.usar_proxy && incompleto) {
+    statusDiv.innerHTML = '<span class="err">⚠ Proxy LIGADO mas INCOMPLETO (falta host, porta, usuário ou senha) — ' +
+      'as chamadas saem direto e dão bloqueio_ip. Preencha e salve.</span>';
+  } else if (cfg.usar_proxy) {
+    statusDiv.innerHTML = `<span class="proxy-on">● Proxy ligado</span> — ${cfg.proxy_host}:${cfg.proxy_port}`;
   } else {
     statusDiv.innerHTML = '<span class="proxy-off">○ Proxy desligado (chamadas diretas)</span>';
   }
 }
 
 async function salvarProxy() {
-  const payload = {
-    usar_proxy: document.getElementById('proxyLigadoInput').checked,
-    proxy_host: document.getElementById('proxyHostInput').value.trim(),
-    proxy_port: document.getElementById('proxyPortInput').value.trim(),
-    proxy_user: document.getElementById('proxyUserInput').value.trim(),
-  };
+  const payload = { usar_proxy: document.getElementById('proxyLigadoInput').checked };
+  // Campos vazios NAO sao enviados (e o backend tambem ignora vazios): um
+  // salvamento em branco ja deixou o proxy ligado sem host/usuario.
+  for (const [campo, id] of [['proxy_host', 'proxyHostInput'], ['proxy_port', 'proxyPortInput'], ['proxy_user', 'proxyUserInput']]) {
+    const v = document.getElementById(id).value.trim();
+    if (v) payload[campo] = v;
+  }
   const senha = document.getElementById('proxyPassInput').value;
   if (senha) {
     // So envia a senha se o campo foi preenchido - deixar vazio mantem a
@@ -290,10 +312,82 @@ async function salvarProxy() {
   carregarProxy();
 }
 
+
+function fmtMB(mb) {
+  if (mb === null || mb === undefined) return '—';
+  return mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb.toFixed(1) + ' MB';
+}
+function fmtN(v, casas = 2) { return (v === null || v === undefined) ? '—' : Number(v).toFixed(casas); }
+
+async function carregarSaldo(atualizar = false) {
+  const d = await fetch('/admin/proxy/saldo' + (atualizar ? '?atualizar=true' : '')).then(r => r.json());
+  const st = document.getElementById('saldoStatus');
+  const cfg = d.config || {};
+  if (!d.configurado) {
+    st.innerHTML = '<span class="proxy-off">○ API key do Proxy-Seller não configurada — informe abaixo para acompanhar o saldo.</span>';
+  } else if (!d.ultima_consulta) {
+    st.innerHTML = '<span class="warn">Aguardando a primeira consulta (acontece de hora em hora; use "Atualizar agora").</span>';
+  } else {
+    const cor = { ok: 'ok', baixo: 'warn', zerado: 'err' }[d.nivel] || 'warn';
+    const txt = { ok: 'Saldo ok', baixo: '⚠ Saldo BAIXO', zerado: '⛔ Saldo ZERADO — recarregue' }[d.nivel] || 'Saldo';
+    st.innerHTML = `<span class="${cor}">${txt}</span> — última consulta: ${new Date(d.ultima_consulta + 'Z').toLocaleString('pt-BR')}`;
+  }
+  if (d.ultimo_erro) st.innerHTML += `<br><span class="err">Erro na consulta: ${d.ultimo_erro}</span>`;
+  if (d.consulta_agora && !d.consulta_agora.ok) st.innerHTML += `<br><span class="err">${d.consulta_agora.motivo}</span>`;
+
+  const barra = document.getElementById('saldoBarra');
+  const pct = d.percentual_restante ?? 0;
+  barra.style.width = pct + '%';
+  barra.style.background = d.nivel === 'zerado' ? '#f87171' : d.nivel === 'baixo' ? '#fbbf24' : '#4ade80';
+
+  const e = d.estimativa || {};
+  const cards = [];
+  if (d.ultima_consulta) {
+    cards.push([fmtMB(d.traffic_left_mb), `restante (${fmtN(d.percentual_restante, 1)}%)`]);
+    cards.push([fmtMB(d.traffic_usage_mb), 'consumido no pacote']);
+    cards.push([e.consumo_medio_dia_mb !== undefined ? fmtMB(e.consumo_medio_dia_mb) : '—', 'consumo médio/dia']);
+    cards.push([e.dias_restantes !== undefined && e.dias_restantes !== null ? fmtN(e.dias_restantes, 1) : '—', 'dias restantes (estimado)']);
+    cards.push([e.kb_por_cpf !== undefined && e.kb_por_cpf !== null ? fmtN(e.kb_por_cpf, 0) + ' KB' : '—', 'tráfego por CPF']);
+    if (cfg.preco_gb !== null && cfg.preco_gb !== undefined) {
+      cards.push([fmtN(d.custo_total_ja_consumido, 2), 'custo já consumido']);
+      cards.push([e.custo_medio_dia !== undefined ? fmtN(e.custo_medio_dia, 2) : '—', 'custo médio/dia']);
+      cards.push([e.custo_por_1000_cpfs !== undefined && e.custo_por_1000_cpfs !== null ? fmtN(e.custo_por_1000_cpfs, 2) : '—', 'custo / 1000 CPFs']);
+    }
+  }
+  document.getElementById('saldoCards').innerHTML = cards.map(([n, l]) =>
+    `<div class="card"><div class="num" style="font-size:22px;">${n}</div><div class="label">${l}</div></div>`).join('');
+
+  document.getElementById('saldoAlertaInput').value = cfg.alerta_mb ?? '';
+  document.getElementById('saldoPrecoInput').value = cfg.preco_gb ?? '';
+  document.getElementById('saldoWebhookInput').value = cfg.alerta_webhook || '';
+  document.getElementById('saldoObs').textContent = e.janela_horas
+    ? `Estimativa baseada nas últimas ${e.janela_horas}h (${e.cpfs_na_janela} CPFs via proxy). ${e.obs || ''}`
+    : (d.ultima_consulta ? 'Estimativas aparecem depois de 2 consultas (de hora em hora).' : '');
+}
+
+async function salvarSaldoConfig() {
+  const payload = {};
+  const key = document.getElementById('saldoKeyInput').value.trim();
+  if (key) payload.api_key = key;  // vazio = manter a salva
+  const alerta = document.getElementById('saldoAlertaInput').value;
+  if (alerta !== '') payload.alerta_mb = parseFloat(alerta);
+  const preco = document.getElementById('saldoPrecoInput').value;
+  if (preco !== '') payload.preco_gb = parseFloat(preco);
+  payload.alerta_webhook_url = document.getElementById('saldoWebhookInput').value.trim();
+  const r = await fetch('/admin/proxy/saldo/config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  if (!r.ok) { alert('Não salvou: ' + (await r.text())); return; }
+  document.getElementById('saldoKeyInput').value = '';
+  carregarSaldo(!!key);  // se trocou a chave, ja consulta
+}
+
 carregar();
 carregarEquipes();
 carregarProxy();
+carregarSaldo();
 setInterval(carregar, 5000);
+setInterval(carregarSaldo, 60000);
 </script>
 </body>
 </html>

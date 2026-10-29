@@ -99,6 +99,28 @@ requirements.txt.
 - Reduzir a concorrencia nao cancela mais job em andamento: o worker termina
   o job atual e so entao sai (antes deixava zumbi em `processando`).
 
+### 11. Saldo do proxy, estimativa de gasto e alerta
+- `proxy_saldo.py` consulta a API do Proxy-Seller
+  (`GET https://proxy-seller.com/personal/api/v2/{API_KEY}/resident/package`
+  -> `traffic_limit/usage/left` em bytes) de hora em hora e guarda fotos na
+  tabela `proxy_saldo`. A API key vai na URL: o logger do httpx fica em
+  WARNING e os erros sao sanitizados para a chave nunca ir para o log.
+  O IP da VPS precisa estar autorizado no painel do Proxy-Seller
+  (senao a API responde "IP not allowed" - aparece no painel como erro).
+- Painel: card "Saldo do proxy" (restante, consumido, consumo/dia, dias
+  restantes, KB por CPF e, se houver preco/GB, custo ja consumido, por dia e
+  por 1000 CPFs). Config via painel ou `POST /admin/proxy/saldo/config`
+  (`api_key`, `alerta_mb`, `preco_gb`, `alerta_webhook_url`);
+  `GET /admin/proxy/saldo?atualizar=true` consulta na hora.
+- Alerta por POST no `alerta_webhook_url` (n8n) quando restar menos que
+  `alerta_mb` (default 500) ou zerar: 1 aviso por mudanca de nivel, lembrete
+  a cada 24h, rearma apos recarga. Payload: `{tipo:"proxy_saldo", nivel,
+  traffic_left_mb, dias_restantes_estimado, mensagem}`.
+- A estimativa de consumo inclui qualquer outro uso da mesma conta de proxy.
+- Proxy: campos host/porta/usuario/senha vazios sao ignorados ao salvar (um
+  salvamento em branco ja deixou o proxy ligado e vazio); o painel avisa em
+  vermelho quando o proxy esta ligado mas incompleto.
+
 ## Ambientes ativos
 
 - **VPS produção:** `https://factaclt.automacaofintech.digital`

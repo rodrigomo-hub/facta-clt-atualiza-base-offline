@@ -122,6 +122,18 @@ def init_db():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_status ON webhooks(status, proximo_envio)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_req ON webhooks(req_id)")
+        # Fotos periodicas do saldo de trafego do proxy (API do provedor) -
+        # servem para estimar consumo/dia, dias restantes e custo.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS proxy_saldo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                consultado_em TEXT NOT NULL,
+                traffic_limit INTEGER,
+                traffic_usage INTEGER,
+                traffic_left INTEGER
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_proxy_saldo_em ON proxy_saldo(consultado_em)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS config (
                 chave TEXT PRIMARY KEY,
@@ -201,16 +213,20 @@ def set_proxy_config(
     proxy_user: Optional[str] = None,
     proxy_pass: Optional[str] = None,
 ):
+    """
+    Campos de texto vazios sao IGNORADOS (nao apagam o valor salvo): um
+    salvamento em branco no painel ja deixou o proxy "ligado" sem host/porta/
+    usuario, e todas as chamadas passaram a sair direto e tomar 403. Para
+    parar de usar o proxy, desligue `usar_proxy`.
+    """
     if usar_proxy is not None:
         set_config("usar_proxy", "true" if usar_proxy else "false")
-    if proxy_host is not None:
-        set_config("proxy_host", proxy_host)
-    if proxy_port is not None:
-        set_config("proxy_port", str(proxy_port))
-    if proxy_user is not None:
-        set_config("proxy_user", proxy_user)
-    if proxy_pass is not None:
-        set_config("proxy_pass", proxy_pass)
+    for chave, valor in (
+        ("proxy_host", proxy_host), ("proxy_port", proxy_port),
+        ("proxy_user", proxy_user), ("proxy_pass", proxy_pass),
+    ):
+        if valor is not None and str(valor).strip() != "":
+            set_config(chave, str(valor).strip())
 
 
 def get_equipe(api_key: str) -> Optional[dict]:
@@ -541,3 +557,47 @@ def reenviar_webhooks_falhos() -> int:
             (agora,),
         )
         return cur.rowcount
+
+
+
+# ------------------------------------------------------------------
+# Saldo de trafego do proxy (snapshots)
+# ------------------------------------------------------------------
+
+def salvar_saldo(traffic_limit: Optional[int], traffic_usage: Optional[int], traffic_left: Optional[int]):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO proxy_saldo (consultado_em, traffic_limit, traffic_usage, traffic_left) VALUES (?, ?, ?, ?)",
+            (datetime.utcnow().isoformat(), traffic_limit, traffic_usage, traffic_left),
+        )
+        # Mantem ~90 dias de historico (1 foto por hora = ~2200 linhas)
+        conn.execute(
+            "DELETE FROM proxy_saldo WHERE consultado_em < ?",
+            ((datetime.utcnow() - timedelta(days=90)).isoformat(),),
+        )
+
+
+def ultimo_saldo() -> Optional[dict]:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM proxy_saldo ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
+
+def saldos_desde(desde_iso: str) -> list[dict]:
+    """Fotos a partir de `desde_iso`, mais a ultima anterior a ela (ponto de referencia da janela)."""
+    with get_conn() as conn:
+        antes = conn.execute(
+            "SELECT * FROM proxy_saldo WHERE consultado_em < ? ORDER BY consultado_em DESC LIMIT 1", (desde_iso,)
+        ).fetchone()
+        rows = conn.execute(
+            "SELECT * FROM proxy_saldo WHERE consultado_em >= ? ORDER BY consultado_em", (desde_iso,)
+        ).fetchall()
+        return ([dict(antes)] if antes else []) + [dict(r) for r in rows]
+
+
+def contar_requisicoes_proxy_desde(desde_iso: str) -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM requisicoes WHERE usou_proxy = 1 AND finalizado_em >= ?", (desde_iso,)
+        ).fetchone()
+        return row["n"] or 0
