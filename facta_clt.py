@@ -11,7 +11,8 @@ import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-import httpx
+from curl_cffi import requests as cffi_requests
+from curl_cffi.requests import exceptions as cffi_exc
 
 logger = logging.getLogger("facta_clt")
 
@@ -20,6 +21,14 @@ URL_AUTORIZAR = f"{BASE_URL}/clt/analisa-cliente"
 URL_SIMULAR = f"{BASE_URL}/clt/simulando"
 ORIGIN = "https://autocontratacao.factafinanceira.com.br"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+
+# O Cloudflare da Facta passou a devolver 403 "Just a moment" para o handshake
+# TLS/HTTP2 do httpx (impressao digital de cliente Python), mesmo saindo por
+# IP residencial - o curl e navegadores passam. curl_cffi reproduz a
+# impressao digital TLS de um navegador real. Perfil configuravel por env
+# caso o Cloudflare passe a barrar este tambem (ex: chrome131, safari17_0).
+IMPERSONATE = os.getenv("FACTA_IMPERSONATE", "chrome120")
+TIMEOUT_SEGUNDOS = float(os.getenv("FACTA_TIMEOUT_SEGUNDOS", "60"))
 
 # ------------------------------------------------------------------
 # Proxy residencial (Proxy-Seller) - usado para variar o IP de saida
@@ -199,10 +208,10 @@ def _classificar_erro(e: Exception) -> TentativaResultado:
     # IP, etc) - diferente de erro de rede generico ou de bloqueio da Facta.
     # Importante distinguir para o dashboard mostrar se o gargalo e o
     # provedor de proxy ou a propria Facta.
-    if isinstance(e, (httpx.ProxyError, httpx.ConnectTimeout, httpx.ConnectError)) and _montar_proxy_url():
+    if isinstance(e, (cffi_exc.ProxyError, cffi_exc.ConnectTimeout, cffi_exc.ConnectionError)) and _montar_proxy_url():
         return TentativaResultado(ok=False, tipo_erro="erro_proxy", detalhe=detalhe, status_code=None)
 
-    if isinstance(e, httpx.HTTPStatusError):
+    if isinstance(e, cffi_exc.HTTPError) and getattr(e, "response", None) is not None:
         status_code = e.response.status_code
         detalhe = f"HTTP {status_code}: {e.response.text[:200]}"
         corpo_lower = e.response.text.lower()
@@ -216,7 +225,7 @@ def _classificar_erro(e: Exception) -> TentativaResultado:
     return TentativaResultado(ok=False, tipo_erro="erro_rede", detalhe=detalhe, status_code=status_code)
 
 
-def autorizar_facta(client: httpx.Client, cpf: str, dados: DadosGerados) -> Tuple[Optional[dict], Optional[TentativaResultado]]:
+def autorizar_facta(client: cffi_requests.Session, cpf: str, dados: DadosGerados) -> Tuple[Optional[dict], Optional[TentativaResultado]]:
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "application/json",
@@ -233,7 +242,7 @@ def autorizar_facta(client: httpx.Client, cpf: str, dados: DadosGerados) -> Tupl
     }
     try:
         _aguardar_rate_limit()
-        resp = client.post(URL_AUTORIZAR, headers=headers, data=body, timeout=None)
+        resp = client.post(URL_AUTORIZAR, headers=headers, data=body, timeout=TIMEOUT_SEGUNDOS)
         resp.raise_for_status()
         return resp.json(), None
     except Exception as e:
@@ -242,7 +251,7 @@ def autorizar_facta(client: httpx.Client, cpf: str, dados: DadosGerados) -> Tupl
         return None, erro
 
 
-def simular_uuid(client: httpx.Client, uuid: str) -> Tuple[Optional[dict], Optional[TentativaResultado]]:
+def simular_uuid(client: cffi_requests.Session, uuid: str) -> Tuple[Optional[dict], Optional[TentativaResultado]]:
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "application/json",
@@ -252,7 +261,7 @@ def simular_uuid(client: httpx.Client, uuid: str) -> Tuple[Optional[dict], Optio
     body = {"uuid": uuid}
     try:
         _aguardar_rate_limit()
-        resp = client.post(URL_SIMULAR, headers=headers, data=body, timeout=None)
+        resp = client.post(URL_SIMULAR, headers=headers, data=body, timeout=TIMEOUT_SEGUNDOS)
         resp.raise_for_status()
         if not resp.text.strip():
             # Facta as vezes responde 200 com corpo vazio - nao e erro de
@@ -269,9 +278,10 @@ def simular_uuid(client: httpx.Client, uuid: str) -> Tuple[Optional[dict], Optio
         return None, erro
 
 
-def _novo_client(usar_proxy: bool) -> httpx.Client:
+def _novo_client(usar_proxy: bool) -> cffi_requests.Session:
     proxy_url = _montar_proxy_url() if usar_proxy else None
-    return httpx.Client(proxy=proxy_url)
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    return cffi_requests.Session(impersonate=IMPERSONATE, proxies=proxies)
 
 
 def simular_clt(cpf: str, tentativas: int = 5) -> dict:

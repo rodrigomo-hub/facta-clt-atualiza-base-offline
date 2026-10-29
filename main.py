@@ -298,8 +298,9 @@ async def diagnostico_facta(via_proxy: bool = False, _admin: bool = Depends(exig
     esta sendo bloqueado pelo Cloudflare da Facta, sem esperar timeout do
     fluxo completo.
     """
-    import httpx as _httpx
+    from curl_cffi import requests as _cffi
     import time as _time
+    import facta_clt as _fc
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
@@ -330,11 +331,13 @@ async def diagnostico_facta(via_proxy: bool = False, _admin: bool = Depends(exig
 
     inicio = _time.monotonic()
     try:
-        async with _httpx.AsyncClient(timeout=15, proxy=proxy_url) as client:
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        async with _cffi.AsyncSession(impersonate=_fc.IMPERSONATE, proxies=proxies) as client:
             resp = await client.post(
                 "https://api-autocontratacao.factafinanceira.com.br/clt/analisa-cliente",
                 headers=headers,
                 data=body,
+                timeout=15,
             )
         duracao = round(_time.monotonic() - inicio, 2)
         eh_challenge_cloudflare = "Just a moment" in resp.text[:500]
