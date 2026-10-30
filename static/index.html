@@ -100,6 +100,10 @@
       <button onclick="salvarConcorrencia()">Salvar</button>
       <span id="filaAtual" style="color:#999; font-size:12px;"></span>
     </div>
+    <div class="config-row" style="margin-top:10px;">
+      <button id="btnPausa" onclick="alternarPausa()">Pausar processamento</button>
+      <span id="pausaStatus" style="font-size:13px;"></span>
+    </div>
   </section>
 
   <section>
@@ -187,6 +191,13 @@ async function carregar() {
   `;
 
   document.getElementById('concorrenciaInput').value = config.concorrencia;
+  window.__pausado = !!config.pausado;
+  const bp = document.getElementById('btnPausa');
+  bp.textContent = config.pausado ? 'Retomar processamento' : 'Pausar processamento';
+  bp.style.background = config.pausado ? '#16a34a' : '#dc2626';
+  document.getElementById('pausaStatus').innerHTML = config.pausado
+    ? '<b style="color:#f87171;">PAUSADO</b> - a fila recebe CPFs mas nenhum novo comeca (o que ja esta rodando termina)'
+    : '<span style="color:#4ade80;">rodando</span>';
   document.getElementById('filaAtual').textContent = `fila atual: ${config.tamanho_fila_atual}`;
 
   const tbodyEquipes = document.querySelector('#tabelaEquipes tbody');
@@ -297,6 +308,15 @@ async function salvarPrioridade(apiKey) {
     body: JSON.stringify({ api_key: apiKey, prioridade })
   });
   carregarEquipes();
+}
+
+async function alternarPausa() {
+  await fetch('/admin/config/pausa', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pausado: !window.__pausado })
+  });
+  carregar();
 }
 
 async function salvarConcorrencia() {

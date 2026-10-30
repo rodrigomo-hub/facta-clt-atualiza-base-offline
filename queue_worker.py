@@ -143,8 +143,26 @@ class FilaSimulacao:
         self._concorrencia_atual = 0
         self._lock = asyncio.Lock()
         self._entregador_task: Optional[asyncio.Task] = None
+        # Pausa: com o evento "fechado" os workers nao pegam novos jobs (o que ja
+        # esta rodando termina). A fila continua aceitando e guardando CPFs.
+        self._liberado = asyncio.Event()
+        self._liberado.set()
+
+    def pausado(self) -> bool:
+        return not self._liberado.is_set()
+
+    def definir_pausa(self, pausar: bool):
+        database.set_config("pausado", "1" if pausar else "0")
+        if pausar:
+            self._liberado.clear()
+        else:
+            self._liberado.set()
+        logger.warning("Fila PAUSADA" if pausar else "Fila RETOMADA")
 
     async def iniciar(self):
+        if database.get_config("pausado", "0") == "1":
+            self._liberado.clear()
+            logger.warning("Fila inicia PAUSADA (estado salvo)")
         recuperados = self.recuperar_pendentes()
         liberados = database.liberar_webhooks_orfaos()
         if recuperados or liberados:
@@ -282,7 +300,13 @@ class FilaSimulacao:
         logger.info(f"Worker {worker_num} iniciado")
         try:
             while True:
-                _prioridade_invertida, _seq, job = await self._fila.get()
+                await self._liberado.wait()
+                item = await self._fila.get()
+                if not self._liberado.is_set():  # pausou enquanto esperava o job: devolve
+                    self._fila.put_nowait(item)
+                    self._fila.task_done()
+                    continue
+                _prioridade_invertida, _seq, job = item
                 estado.ocupado = True
                 try:
                     await self._processar(job)

@@ -255,7 +255,19 @@ async def get_config(_admin: bool = Depends(exigir_admin)):
     return {
         "concorrencia": fila_global.concorrencia_atual(),
         "tamanho_fila_atual": fila_global.tamanho_fila(),
+        "pausado": fila_global.pausado(),
     }
+
+
+class PausaRequest(BaseModel):
+    pausado: bool
+
+
+@app.post("/admin/config/pausa")
+async def set_pausa(payload: PausaRequest, _admin: bool = Depends(exigir_admin)):
+    """Pausa/retoma o processamento. Em pausa a fila continua aceitando CPFs, mas nenhum novo job comeca."""
+    fila_global.definir_pausa(payload.pausado)
+    return {"pausado": fila_global.pausado(), "tamanho_fila_atual": fila_global.tamanho_fila()}
 
 
 @app.post("/admin/config/concorrencia")

@@ -170,3 +170,5 @@ curl -s https://factaclt.automacaofintech.digital/admin/capacidade | python3 -m 
 - **Entrega do webhook** (`queue_worker._enviar_webhook`): timeout de leitura `WEBHOOK_TIMEOUT_SEGUNDOS` (default 60). Leitura estourou -> considerado entregue (aviso em `ultimo_erro`), NAO reenvia (evita rodar o fluxo 2x). Retry so em erro de conexao e HTTP 408/425/429/502/503/504. Outros non-2xx (500, 404...) -> `falhou` na hora (reenvio manual em `/admin/webhooks/reenviar`). `webhooks.status_http` e `webhooks.resposta` guardam o retorno do destino.
 - Fluxo pronto: `n8n/retorno_com_metricas.json` (token do painel esteira e placeholder; `$('')` corrigido; nos "Reportar Resultado - *" em cada termino; Respond no caminho de ofertas).
 - Testes (fora do repo): test_resultado.py (15), test_webhook.py (37).
+
+- **Pausa** (`POST /admin/config/pausa {"pausado": bool}`, botao no painel): workers nao pegam novos jobs; a fila continua aceitando CPFs; o que esta rodando termina. Estado salvo em `config.pausado` e respeitado no boot.
