@@ -171,4 +171,4 @@ curl -s https://factaclt.automacaofintech.digital/admin/capacidade | python3 -m 
 - Fluxo pronto: `n8n/retorno_com_metricas.json` (token do painel esteira e placeholder; `$('')` corrigido; nos "Reportar Resultado - *" em cada termino; Respond no caminho de ofertas).
 - Testes (fora do repo): test_resultado.py (15), test_webhook.py (37).
 
-- **Pausa** (`POST /admin/config/pausa {"pausado": bool}`, botao no painel): workers nao pegam novos jobs; a fila continua aceitando CPFs; o que esta rodando termina. Estado salvo em `config.pausado` e respeitado no boot.
+- **Pausa** (`POST /admin/config/pausa {"pausado": bool}`, botao no painel): em pausa `/simular_facta_clt` (e `/aguardar`) recusa CPFs novos com 503 e os workers nao comecam jobs novos; o que ja esta rodando termina. Estado salvo em `config.pausado`, respeitado no boot.

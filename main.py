@@ -166,6 +166,13 @@ class ProxyConfigRequest(BaseModel):
 # ENDPOINTS - SIMULACAO (enfileirada)
 # ============================================================
 
+def _recusar_se_pausado():
+    """Em pausa o servico NAO aceita CPFs novos (o n8n recebe 503 e segue para o proximo)."""
+    if fila_global.pausado():
+        raise HTTPException(status_code=503, detail="Servico pausado: nenhum CPF novo e aceito no momento",
+                            headers={"Retry-After": "60"})
+
+
 @app.post("/simular_facta_clt")
 async def simular_facta_clt(payload: SimularRequest, equipe: dict = Depends(get_equipe_atual)):
     """
@@ -175,6 +182,7 @@ async def simular_facta_clt(payload: SimularRequest, equipe: dict = Depends(get_
     sobrecarreguem a Facta de uma vez - o processamento real respeita o
     limite de concorrencia configurado no painel.
     """
+    _recusar_se_pausado()
     job_id, ja_existia = await fila_global.enfileirar(
         equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas,
         prioridade=equipe.get("prioridade", 0),
@@ -205,6 +213,7 @@ async def simular_facta_clt_aguardar(
     Mesmo fluxo, mas aguarda o resultado antes de responder (uso mais simples
     para quem nao quer fazer polling). Sujeito ao timeout informado.
     """
+    _recusar_se_pausado()
     job_id, _ja_existia = await fila_global.enfileirar(
         equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas,
         prioridade=equipe.get("prioridade", 0),
@@ -265,7 +274,7 @@ class PausaRequest(BaseModel):
 
 @app.post("/admin/config/pausa")
 async def set_pausa(payload: PausaRequest, _admin: bool = Depends(exigir_admin)):
-    """Pausa/retoma o processamento. Em pausa a fila continua aceitando CPFs, mas nenhum novo job comeca."""
+    """Pausa/retoma. Em pausa nenhum job novo comeca E /simular_facta_clt recusa CPFs novos com 503."""
     fila_global.definir_pausa(payload.pausado)
     return {"pausado": fila_global.pausado(), "tamanho_fila_atual": fila_global.tamanho_fila()}
 
