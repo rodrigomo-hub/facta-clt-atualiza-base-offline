@@ -148,6 +148,32 @@ class FilaSimulacao:
         self._liberado = asyncio.Event()
         self._liberado.set()
 
+    def limpar_tudo(self) -> dict:
+        """
+        Zera fila, jobs em memoria e banco (CPFs, webhooks, resultados). Quem esta
+        esperando em /aguardar recebe falha 'cancelado'. Jobs que ja estao rodando
+        numa thread terminam em segundo plano (<= timeout da Facta), mas seu
+        resultado nao e gravado nem enviado por webhook (as linhas foram apagadas).
+        """
+        removidos_fila = 0
+        while True:
+            try:
+                self._fila.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._fila.task_done()
+            removidos_fila += 1
+        for job in list(self._jobs.values()):
+            if job.status in ("na_fila", "processando"):
+                job.status = "falha"
+                job.resultado = {"status": "falha", "tipo_erro": "cancelado", "detalhe_erro": "limpeza manual"}
+                job.evento.set()
+        self._jobs.clear()
+        self._cpfs_ativos.clear()
+        apagados = database.limpar_tudo()
+        logger.warning(f"LIMPEZA TOTAL: fila={removidos_fila} banco={apagados}")
+        return {"fila_removida": removidos_fila, **apagados}
+
     def pausado(self) -> bool:
         return not self._liberado.is_set()
 

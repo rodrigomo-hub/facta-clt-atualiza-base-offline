@@ -731,3 +731,12 @@ def stats_funil_hoje(equipe: Optional[str] = None) -> dict:
         "motivos": sorted(motivos.values(), key=lambda m: -m["qtd"]),
         "por_equipe": eq,
     }
+
+
+def limpar_tudo() -> dict:
+    """Apaga todas as requisicoes (CPFs), webhooks e resultados do fluxo. Mantem equipes e config."""
+    apagados = {}
+    with get_conn() as conn:
+        for t in ("webhooks", "resultados_fluxo", "requisicoes"):
+            apagados[t] = conn.execute(f"DELETE FROM {t}").rowcount
+    return apagados

@@ -104,6 +104,10 @@
       <button id="btnPausa" onclick="alternarPausa()">Pausar processamento</button>
       <span id="pausaStatus" style="font-size:13px;"></span>
     </div>
+    <div class="config-row" style="margin-top:10px;">
+      <button onclick="limparTudo()" style="background:#7f1d1d;">Apagar tudo (CPFs, fila e histórico)</button>
+      <span style="color:#999; font-size:12px;">mantém equipes e configurações</span>
+    </div>
   </section>
 
   <section>
@@ -308,6 +312,19 @@ async function salvarPrioridade(apiKey) {
     body: JSON.stringify({ api_key: apiKey, prioridade })
   });
   carregarEquipes();
+}
+
+async function limparTudo() {
+  const txt = prompt('Isso apaga TODOS os CPFs consultados, a fila, os webhooks e o funil. Não tem volta.\n\nDigite APAGAR para confirmar:');
+  if (txt !== 'APAGAR') return;
+  const r = await fetch('/admin/limpar-tudo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirmar: 'APAGAR' })
+  });
+  const j = await r.json().catch(() => ({}));
+  alert(r.ok ? `Apagado: ${j.requisicoes} CPFs, ${j.webhooks} webhooks, ${j.resultados_fluxo} resultados, ${j.fila_removida} da fila.` : 'Erro ao apagar');
+  carregar();
 }
 
 async function alternarPausa() {

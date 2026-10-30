@@ -272,6 +272,18 @@ class PausaRequest(BaseModel):
     pausado: bool
 
 
+class LimparRequest(BaseModel):
+    confirmar: str
+
+
+@app.post("/admin/limpar-tudo")
+async def limpar_tudo(payload: LimparRequest, _admin: bool = Depends(exigir_admin)):
+    """Apaga TODOS os CPFs/requisicoes, webhooks, resultados e a fila. Exige confirmar="APAGAR"."""
+    if payload.confirmar != "APAGAR":
+        raise HTTPException(status_code=400, detail='Envie {"confirmar": "APAGAR"}')
+    return fila_global.limpar_tudo()
+
+
 @app.post("/admin/config/pausa")
 async def set_pausa(payload: PausaRequest, _admin: bool = Depends(exigir_admin)):
     """Pausa/retoma. Em pausa nenhum job novo comeca E /simular_facta_clt recusa CPFs novos com 503."""

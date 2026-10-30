@@ -172,3 +172,4 @@ curl -s https://factaclt.automacaofintech.digital/admin/capacidade | python3 -m 
 - Testes (fora do repo): test_resultado.py (15), test_webhook.py (37).
 
 - **Pausa** (`POST /admin/config/pausa {"pausado": bool}`, botao no painel): em pausa `/simular_facta_clt` (e `/aguardar`) recusa CPFs novos com 503 e os workers nao comecam jobs novos; o que ja esta rodando termina. Estado salvo em `config.pausado`, respeitado no boot.
+- **Apagar tudo** (`POST /admin/limpar-tudo {"confirmar":"APAGAR"}`, botao no painel com confirmacao digitada): zera fila, jobs em memoria, requisicoes, webhooks e resultados; mantem equipes/config. Sem precisar reiniciar.
