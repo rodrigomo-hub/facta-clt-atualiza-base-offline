@@ -265,7 +265,19 @@ async def get_config(_admin: bool = Depends(exigir_admin)):
         "concorrencia": fila_global.concorrencia_atual(),
         "tamanho_fila_atual": fila_global.tamanho_fila(),
         "pausado": fila_global.pausado(),
+        "max_tentativas": fila_global.max_tentativas(),
     }
+
+
+class TentativasRequest(BaseModel):
+    max_tentativas: int = Field(..., ge=1, le=10)
+
+
+@app.post("/admin/config/tentativas")
+async def set_max_tentativas(payload: TentativasRequest, _admin: bool = Depends(exigir_admin)):
+    """Teto global de tentativas por CPF; vence o `tentativas` enviado pelo chamador (vale tambem para jobs ja na fila)."""
+    database.set_config("max_tentativas", str(payload.max_tentativas))
+    return {"max_tentativas": fila_global.max_tentativas()}
 
 
 class PausaRequest(BaseModel):

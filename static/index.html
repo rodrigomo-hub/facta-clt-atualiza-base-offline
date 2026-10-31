@@ -101,6 +101,12 @@
       <span id="filaAtual" style="color:#999; font-size:12px;"></span>
     </div>
     <div class="config-row" style="margin-top:10px;">
+      <span>Tentativas máximas por CPF:</span>
+      <input type="number" id="tentativasInput" min="1" max="10" style="width:70px;">
+      <button onclick="salvarTentativas()">Salvar</button>
+      <span style="color:#999; font-size:12px;">vale para todos os chamadores (vence o valor enviado pelo n8n)</span>
+    </div>
+    <div class="config-row" style="margin-top:10px;">
       <button id="btnPausa" onclick="alternarPausa()">Pausar processamento</button>
       <span id="pausaStatus" style="font-size:13px;"></span>
     </div>
@@ -196,6 +202,8 @@ async function carregar() {
 
   document.getElementById('concorrenciaInput').value = config.concorrencia;
   window.__pausado = !!config.pausado;
+  const ti = document.getElementById('tentativasInput');
+  if (document.activeElement !== ti) ti.value = config.max_tentativas;
   const bp = document.getElementById('btnPausa');
   bp.textContent = config.pausado ? 'Retomar processamento' : 'Pausar processamento';
   bp.style.background = config.pausado ? '#16a34a' : '#dc2626';
@@ -312,6 +320,16 @@ async function salvarPrioridade(apiKey) {
     body: JSON.stringify({ api_key: apiKey, prioridade })
   });
   carregarEquipes();
+}
+
+async function salvarTentativas() {
+  const v = parseInt(document.getElementById('tentativasInput').value, 10);
+  await fetch('/admin/config/tentativas', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_tentativas: v })
+  });
+  carregar();
 }
 
 async function limparTudo() {

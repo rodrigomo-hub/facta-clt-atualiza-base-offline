@@ -23,7 +23,8 @@ services:
       # CPF, mesmo com tentativas sobrando. Default original era 2 (fixo
       # no codigo); 5 = usa todas as tentativas normalmente antes de
       # desistir (nao para antecipado so por vir vazio).
-      - FACTA_MAX_SEM_RETORNO=5
+      - FACTA_MAX_SEM_RETORNO=2
+      - MAX_TENTATIVAS=${MAX_TENTATIVAS:-2}
     volumes:
       - facta_clt_data:/app/data
     networks:

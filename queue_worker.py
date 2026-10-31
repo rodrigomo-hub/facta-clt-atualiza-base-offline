@@ -24,6 +24,7 @@ SEGUNDOS_JOB_FINALIZADO_EM_MEMORIA = 600
 
 PERMITIR_REDE_PRIVADA = os.getenv("WEBHOOK_PERMITIR_REDE_PRIVADA", "false").lower() in ("1", "true", "yes")
 WEBHOOK_TIMEOUT_SEGUNDOS = float(os.getenv("WEBHOOK_TIMEOUT_SEGUNDOS", "60"))
+MAX_TENTATIVAS_PADRAO = int(os.getenv("MAX_TENTATIVAS", "2"))
 MAX_CONCORRENCIA = int(os.getenv("MAX_CONCORRENCIA", "500"))
 STATUS_RETRY_WEBHOOK = {408, 425, 429, 502, 503, 504}
 
@@ -174,6 +175,14 @@ class FilaSimulacao:
         logger.warning(f"LIMPEZA TOTAL: fila={removidos_fila} banco={apagados}")
         return {"fila_removida": removidos_fila, **apagados}
 
+    @staticmethod
+    def max_tentativas() -> int:
+        """Teto de tentativas por CPF, valido para qualquer chamador (painel > env, padrao 2)."""
+        try:
+            return max(1, int(database.get_config("max_tentativas", str(MAX_TENTATIVAS_PADRAO))))
+        except ValueError:
+            return max(1, MAX_TENTATIVAS_PADRAO)
+
     def pausado(self) -> bool:
         return not self._liberado.is_set()
 
@@ -273,6 +282,7 @@ class FilaSimulacao:
         `prioridade` maior fura a frente dos jobs de prioridade menor ja
         esperando na fila.
         """
+        tentativas = min(tentativas, self.max_tentativas())
         job_existente = self._cpfs_ativos.get(cpf)
         if job_existente and job_existente in self._jobs:
             job = self._jobs[job_existente]
@@ -350,7 +360,7 @@ class FilaSimulacao:
         job.status = "processando"
         database.marcar_processando(job.req_id)
         try:
-            resultado = await asyncio.to_thread(simular_clt, job.cpf, job.tentativas)
+            resultado = await asyncio.to_thread(simular_clt, job.cpf, min(job.tentativas, self.max_tentativas()))
             job.resultado = resultado
             if resultado["status"] == "ok":
                 job.status = "sucesso"
