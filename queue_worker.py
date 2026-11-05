@@ -1,6 +1,7 @@
 import asyncio
 import ipaddress
 import itertools
+import collections
 import logging
 import os
 import socket
@@ -25,6 +26,9 @@ SEGUNDOS_JOB_FINALIZADO_EM_MEMORIA = 600
 
 PERMITIR_REDE_PRIVADA = os.getenv("WEBHOOK_PERMITIR_REDE_PRIVADA", "false").lower() in ("1", "true", "yes")
 WEBHOOK_TIMEOUT_SEGUNDOS = float(os.getenv("WEBHOOK_TIMEOUT_SEGUNDOS", "60"))
+ADMISSAO_CPFS_PADRAO = int(os.getenv("ADMISSAO_CPFS", "3"))
+ADMISSAO_JANELA_PADRAO = float(os.getenv("ADMISSAO_JANELA_SEGUNDOS", "5"))
+MAX_SIMULTANEOS_PADRAO = int(os.getenv("MAX_SIMULTANEOS", "20"))
 TAXA_INICIO_PADRAO = float(os.getenv("TAXA_INICIO_POR_SEGUNDO", "3"))
 MAX_TENTATIVAS_PADRAO = int(os.getenv("MAX_TENTATIVAS", "2"))
 MAX_CONCORRENCIA = int(os.getenv("MAX_CONCORRENCIA", "500"))
@@ -152,6 +156,8 @@ class FilaSimulacao:
         self._liberado.set()
         # Limite de INICIO de jobs por segundo: alisa rajadas (50/100 CPFs de uma vez
         # viram uma fila que sai em ritmo constante, em vez de 100 conexoes simultaneas).
+        self._admitidos: collections.deque = collections.deque()  # instantes (monotonic) das admissoes na janela
+        self.recusados_ocupado = 0
         self._gate_lock = asyncio.Lock()
         self._proximo_inicio = 0.0
 
@@ -180,6 +186,46 @@ class FilaSimulacao:
         apagados = database.limpar_tudo()
         logger.warning(f"LIMPEZA TOTAL: fila={removidos_fila} banco={apagados}")
         return {"fila_removida": removidos_fila, **apagados}
+
+    @staticmethod
+    def cfg_admissao() -> dict:
+        def _n(chave, padrao, tipo):
+            try:
+                return tipo(database.get_config(chave, str(padrao)))
+            except ValueError:
+                return tipo(padrao)
+        return {
+            "cpfs": max(0, _n("admissao_cpfs", ADMISSAO_CPFS_PADRAO, int)),
+            "janela_segundos": max(0.1, _n("admissao_janela", ADMISSAO_JANELA_PADRAO, float)),
+            "max_simultaneos": max(1, _n("max_simultaneos", MAX_SIMULTANEOS_PADRAO, int)),
+        }
+
+    def cpf_ja_ativo(self, cpf: str) -> bool:
+        jid = self._cpfs_ativos.get(cpf)
+        return bool(jid and jid in self._jobs and self._jobs[jid].status in ("na_fila", "processando"))
+
+    def admitir(self, cpf: str) -> tuple[bool, float, str]:
+        """
+        Controle de admissao (sem fila grande): aceita no maximo `cpfs` novos a cada
+        `janela_segundos` e no maximo `max_simultaneos` em andamento. Fora disso devolve
+        (False, segundos_para_tentar, motivo) e NAO enfileira. CPF ja em andamento passa
+        (volta o mesmo job). Sincrono = atomico no event loop. Admissao 0 = sem limite de ritmo.
+        """
+        if self.cpf_ja_ativo(cpf):
+            return True, 0.0, ""
+        c = self.cfg_admissao()
+        agora = time.monotonic()
+        while self._admitidos and agora - self._admitidos[0] >= c["janela_segundos"]:
+            self._admitidos.popleft()
+        if len(self._cpfs_ativos) >= c["max_simultaneos"]:
+            self.recusados_ocupado += 1
+            return False, min(5.0, c["janela_segundos"]), "muitos_em_processamento"
+        if c["cpfs"] > 0 and len(self._admitidos) >= c["cpfs"]:
+            self.recusados_ocupado += 1
+            espera = c["janela_segundos"] - (agora - self._admitidos[0])
+            return False, round(max(espera, 0.5), 1), "limite_de_ritmo"
+        self._admitidos.append(agora)
+        return True, 0.0, ""
 
     @staticmethod
     def taxa_inicio() -> float:

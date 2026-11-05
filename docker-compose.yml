@@ -26,6 +26,9 @@ services:
       - FACTA_MAX_SEM_RETORNO=2
       - MAX_TENTATIVAS=${MAX_TENTATIVAS:-2}
       - TAXA_INICIO_POR_SEGUNDO=${TAXA_INICIO_POR_SEGUNDO:-3}
+      - ADMISSAO_CPFS=${ADMISSAO_CPFS:-3}
+      - ADMISSAO_JANELA_SEGUNDOS=${ADMISSAO_JANELA_SEGUNDOS:-5}
+      - MAX_SIMULTANEOS=${MAX_SIMULTANEOS:-20}
     volumes:
       - facta_clt_data:/app/data
     networks:

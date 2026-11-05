@@ -100,6 +100,15 @@
       <button onclick="salvarConcorrencia()">Salvar</button>
       <span id="filaAtual" style="color:#999; font-size:12px;"></span>
     </div>
+    <div class="config-row" style="margin-top:10px; flex-wrap:wrap; gap:8px;">
+      <b>Limite de entrada:</b>
+      <input type="number" id="admCpfs" min="0" style="width:60px;"> CPFs a cada
+      <input type="number" id="admJanela" min="0.1" step="0.5" style="width:60px;"> s, no máx.
+      <input type="number" id="admSimult" min="1" style="width:60px;"> em andamento
+      <button onclick="salvarAdmissao()">Salvar</button>
+      <span id="admStatus" style="color:#999; font-size:12px;"></span>
+    </div>
+    <div style="color:#777; font-size:12px; margin:4px 0 0 0;">Acima do limite o serviço responde <code>status: "ocupado"</code> (HTTP 200) e o n8n tenta de novo. 0 CPFs = sem limite de ritmo.</div>
     <div class="config-row" style="margin-top:10px;">
       <span>Máx. CPFs iniciados por segundo:</span>
       <input type="number" id="taxaInput" min="0" max="100" step="0.5" style="width:70px;">
@@ -210,6 +219,13 @@ async function carregar() {
   window.__pausado = !!config.pausado;
   const ti = document.getElementById('tentativasInput');
   if (document.activeElement !== ti) ti.value = config.max_tentativas;
+  const ad = config.admissao || {};
+  for (const [id, v] of [['admCpfs', ad.cpfs], ['admJanela', ad.janela_segundos], ['admSimult', ad.max_simultaneos]]) {
+    const el = document.getElementById(id);
+    if (document.activeElement !== el) el.value = v;
+  }
+  document.getElementById('admStatus').textContent =
+    `em andamento: ${config.em_andamento} | recusados por "ocupado": ${config.recusados_ocupado} (zera ao reiniciar)`;
   const tx = document.getElementById('taxaInput');
   if (document.activeElement !== tx) tx.value = config.taxa_inicio;
   const bp = document.getElementById('btnPausa');
@@ -328,6 +344,19 @@ async function salvarPrioridade(apiKey) {
     body: JSON.stringify({ api_key: apiKey, prioridade })
   });
   carregarEquipes();
+}
+
+async function salvarAdmissao() {
+  await fetch('/admin/config/admissao', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      cpfs: parseInt(document.getElementById('admCpfs').value, 10),
+      janela_segundos: parseFloat(document.getElementById('admJanela').value),
+      max_simultaneos: parseInt(document.getElementById('admSimult').value, 10),
+    })
+  });
+  carregar();
 }
 
 async function salvarTaxa() {

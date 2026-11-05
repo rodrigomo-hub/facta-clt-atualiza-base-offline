@@ -166,6 +166,17 @@ class ProxyConfigRequest(BaseModel):
 # ENDPOINTS - SIMULACAO (enfileirada)
 # ============================================================
 
+def _resposta_ocupado(espera: float, motivo: str):
+    """HTTP 200 (sem erro no n8n) dizendo para tentar de novo."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=200,
+        headers={"Retry-After": str(max(1, int(round(espera))))},
+        content={"status": "ocupado", "motivo": motivo, "tentar_novamente_em": espera,
+                 "mensagem": "Muitos CPFs em processamento agora; tente novamente."},
+    )
+
+
 def _recusar_se_pausado():
     """Em pausa o servico NAO aceita CPFs novos (o n8n recebe 503 e segue para o proximo)."""
     if fila_global.pausado():
@@ -183,6 +194,9 @@ async def simular_facta_clt(payload: SimularRequest, equipe: dict = Depends(get_
     limite de concorrencia configurado no painel.
     """
     _recusar_se_pausado()
+    ok, espera, motivo = fila_global.admitir(payload.cpf)
+    if not ok:
+        return _resposta_ocupado(espera, motivo)
     job_id, ja_existia = await fila_global.enfileirar(
         equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas,
         prioridade=equipe.get("prioridade", 0),
@@ -214,6 +228,9 @@ async def simular_facta_clt_aguardar(
     para quem nao quer fazer polling). Sujeito ao timeout informado.
     """
     _recusar_se_pausado()
+    ok, espera, motivo = fila_global.admitir(payload.cpf)
+    if not ok:
+        return _resposta_ocupado(espera, motivo)
     job_id, _ja_existia = await fila_global.enfileirar(
         equipe=equipe["nome"], cpf=payload.cpf, tentativas=payload.tentativas,
         prioridade=equipe.get("prioridade", 0),
@@ -267,7 +284,25 @@ async def get_config(_admin: bool = Depends(exigir_admin)):
         "pausado": fila_global.pausado(),
         "max_tentativas": fila_global.max_tentativas(),
         "taxa_inicio": fila_global.taxa_inicio(),
+        "admissao": fila_global.cfg_admissao(),
+        "recusados_ocupado": fila_global.recusados_ocupado,
+        "em_andamento": len(fila_global._cpfs_ativos),
     }
+
+
+class AdmissaoRequest(BaseModel):
+    cpfs: int = Field(..., ge=0, le=1000)
+    janela_segundos: float = Field(..., ge=0.1, le=3600)
+    max_simultaneos: int = Field(..., ge=1, le=MAX_CONCORRENCIA)
+
+
+@app.post("/admin/config/admissao")
+async def set_admissao(payload: AdmissaoRequest, _admin: bool = Depends(exigir_admin)):
+    """Admissao: no maximo `cpfs` novos a cada `janela_segundos` e `max_simultaneos` em andamento (0 cpfs = sem limite de ritmo)."""
+    database.set_config("admissao_cpfs", str(payload.cpfs))
+    database.set_config("admissao_janela", str(payload.janela_segundos))
+    database.set_config("max_simultaneos", str(payload.max_simultaneos))
+    return fila_global.cfg_admissao()
 
 
 class TaxaInicioRequest(BaseModel):
