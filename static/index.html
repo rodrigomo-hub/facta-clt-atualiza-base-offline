@@ -101,6 +101,12 @@
       <span id="filaAtual" style="color:#999; font-size:12px;"></span>
     </div>
     <div class="config-row" style="margin-top:10px;">
+      <span>Máx. CPFs iniciados por segundo:</span>
+      <input type="number" id="taxaInput" min="0" max="100" step="0.5" style="width:70px;">
+      <button onclick="salvarTaxa()">Salvar</button>
+      <span style="color:#999; font-size:12px;">alisa rajadas: o excedente espera na fila (0 = sem limite)</span>
+    </div>
+    <div class="config-row" style="margin-top:10px;">
       <span>Tentativas máximas por CPF:</span>
       <input type="number" id="tentativasInput" min="1" max="10" style="width:70px;">
       <button onclick="salvarTentativas()">Salvar</button>
@@ -204,6 +210,8 @@ async function carregar() {
   window.__pausado = !!config.pausado;
   const ti = document.getElementById('tentativasInput');
   if (document.activeElement !== ti) ti.value = config.max_tentativas;
+  const tx = document.getElementById('taxaInput');
+  if (document.activeElement !== tx) tx.value = config.taxa_inicio;
   const bp = document.getElementById('btnPausa');
   bp.textContent = config.pausado ? 'Retomar processamento' : 'Pausar processamento';
   bp.style.background = config.pausado ? '#16a34a' : '#dc2626';
@@ -320,6 +328,16 @@ async function salvarPrioridade(apiKey) {
     body: JSON.stringify({ api_key: apiKey, prioridade })
   });
   carregarEquipes();
+}
+
+async function salvarTaxa() {
+  const v = parseFloat(document.getElementById('taxaInput').value);
+  await fetch('/admin/config/taxa-inicio', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taxa_inicio: v })
+  });
+  carregar();
 }
 
 async function salvarTentativas() {

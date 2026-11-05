@@ -4,6 +4,7 @@ import itertools
 import logging
 import os
 import socket
+import time
 import uuid as uuid_lib
 from typing import Optional
 from urllib.parse import urlparse
@@ -24,6 +25,7 @@ SEGUNDOS_JOB_FINALIZADO_EM_MEMORIA = 600
 
 PERMITIR_REDE_PRIVADA = os.getenv("WEBHOOK_PERMITIR_REDE_PRIVADA", "false").lower() in ("1", "true", "yes")
 WEBHOOK_TIMEOUT_SEGUNDOS = float(os.getenv("WEBHOOK_TIMEOUT_SEGUNDOS", "60"))
+TAXA_INICIO_PADRAO = float(os.getenv("TAXA_INICIO_POR_SEGUNDO", "3"))
 MAX_TENTATIVAS_PADRAO = int(os.getenv("MAX_TENTATIVAS", "2"))
 MAX_CONCORRENCIA = int(os.getenv("MAX_CONCORRENCIA", "500"))
 STATUS_RETRY_WEBHOOK = {408, 425, 429, 502, 503, 504}
@@ -148,6 +150,10 @@ class FilaSimulacao:
         # esta rodando termina). A fila continua aceitando e guardando CPFs.
         self._liberado = asyncio.Event()
         self._liberado.set()
+        # Limite de INICIO de jobs por segundo: alisa rajadas (50/100 CPFs de uma vez
+        # viram uma fila que sai em ritmo constante, em vez de 100 conexoes simultaneas).
+        self._gate_lock = asyncio.Lock()
+        self._proximo_inicio = 0.0
 
     def limpar_tudo(self) -> dict:
         """
@@ -174,6 +180,25 @@ class FilaSimulacao:
         apagados = database.limpar_tudo()
         logger.warning(f"LIMPEZA TOTAL: fila={removidos_fila} banco={apagados}")
         return {"fila_removida": removidos_fila, **apagados}
+
+    @staticmethod
+    def taxa_inicio() -> float:
+        """Jobs iniciados por segundo (0 = sem limite). Painel > env, padrao 3."""
+        try:
+            return max(0.0, float(database.get_config("taxa_inicio", str(TAXA_INICIO_PADRAO))))
+        except ValueError:
+            return max(0.0, TAXA_INICIO_PADRAO)
+
+    async def _aguardar_vaga_inicio(self):
+        taxa = self.taxa_inicio()
+        if taxa <= 0:
+            return
+        async with self._gate_lock:  # serializa quem quer iniciar; o lock fica durante a espera
+            agora = time.monotonic()
+            inicio = max(agora, self._proximo_inicio)
+            if inicio > agora:
+                await asyncio.sleep(inicio - agora)
+            self._proximo_inicio = inicio + 1.0 / taxa
 
     @staticmethod
     def max_tentativas() -> int:
@@ -345,6 +370,7 @@ class FilaSimulacao:
                 _prioridade_invertida, _seq, job = item
                 estado.ocupado = True
                 try:
+                    await self._aguardar_vaga_inicio()
                     await self._processar(job)
                 finally:
                     estado.ocupado = False

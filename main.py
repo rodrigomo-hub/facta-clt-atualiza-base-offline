@@ -266,7 +266,19 @@ async def get_config(_admin: bool = Depends(exigir_admin)):
         "tamanho_fila_atual": fila_global.tamanho_fila(),
         "pausado": fila_global.pausado(),
         "max_tentativas": fila_global.max_tentativas(),
+        "taxa_inicio": fila_global.taxa_inicio(),
     }
+
+
+class TaxaInicioRequest(BaseModel):
+    taxa_inicio: float = Field(..., ge=0, le=100)
+
+
+@app.post("/admin/config/taxa-inicio")
+async def set_taxa_inicio(payload: TaxaInicioRequest, _admin: bool = Depends(exigir_admin)):
+    """Maximo de CPFs que COMECAM por segundo (0 = sem limite). Rajadas esperam na fila."""
+    database.set_config("taxa_inicio", str(payload.taxa_inicio))
+    return {"taxa_inicio": fila_global.taxa_inicio()}
 
 
 class TentativasRequest(BaseModel):

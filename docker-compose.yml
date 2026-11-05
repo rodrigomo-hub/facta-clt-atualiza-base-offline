@@ -25,6 +25,7 @@ services:
       # desistir (nao para antecipado so por vir vazio).
       - FACTA_MAX_SEM_RETORNO=2
       - MAX_TENTATIVAS=${MAX_TENTATIVAS:-2}
+      - TAXA_INICIO_POR_SEGUNDO=${TAXA_INICIO_POR_SEGUNDO:-3}
     volumes:
       - facta_clt_data:/app/data
     networks:
