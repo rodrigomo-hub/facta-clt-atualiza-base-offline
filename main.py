@@ -123,6 +123,8 @@ class ResultadoFluxoRequest(BaseModel):
 
 class NovaEquipeRequest(BaseModel):
     nome: str
+    # Opcional: reaproveitar uma chave existente (ex: migracao de VPS, para o n8n nao precisar mudar).
+    api_key: Optional[str] = Field(None, min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class PrioridadeEquipeRequest(BaseModel):
@@ -253,8 +255,11 @@ async def simular_facta_clt_aguardar(
 
 @app.post("/admin/equipes")
 async def criar_equipe(payload: NovaEquipeRequest, _admin: bool = Depends(exigir_admin)):
-    api_key = secrets.token_hex(16)
-    database.criar_equipe(api_key, payload.nome)
+    api_key = payload.api_key or secrets.token_hex(16)
+    try:
+        database.criar_equipe(api_key, payload.nome)
+    except Exception:
+        raise HTTPException(status_code=409, detail="api_key ja existe")
     return {"nome": payload.nome, "api_key": api_key}
 
 

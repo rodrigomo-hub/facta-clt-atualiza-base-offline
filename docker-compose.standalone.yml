@@ -1,0 +1,48 @@
+# Deploy simples em UMA VPS nova (sem Swarm e sem Traefik): app + Caddy (HTTPS automatico).
+#   1) cp .env.example .env   (preencha ADMIN_USER/ADMIN_PASS e, se quiser, o proxy)
+#   2) apontar o DNS do dominio para o IP da VPS
+#   3) docker compose -f docker-compose.standalone.yml up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      - DB_PATH=/app/data/facta_clt.db
+      - ADMIN_USER=${ADMIN_USER}
+      - ADMIN_PASS=${ADMIN_PASS}
+      - FACTA_USAR_PROXY=${FACTA_USAR_PROXY:-false}
+      - FACTA_PROXY_HOST=${FACTA_PROXY_HOST:-res.proxy-seller.com}
+      - FACTA_PROXY_PORT=${FACTA_PROXY_PORT:-10000}
+      - FACTA_PROXY_USER=${FACTA_PROXY_USER:-}
+      - FACTA_PROXY_PASS=${FACTA_PROXY_PASS:-}
+      - FACTA_MAX_SEM_RETORNO=2
+      - MAX_TENTATIVAS=${MAX_TENTATIVAS:-2}
+      - TAXA_INICIO_POR_SEGUNDO=${TAXA_INICIO_POR_SEGUNDO:-3}
+      - ADMISSAO_CPFS=${ADMISSAO_CPFS:-3}
+      - ADMISSAO_JANELA_SEGUNDOS=${ADMISSAO_JANELA_SEGUNDOS:-5}
+      - MAX_SIMULTANEOS=${MAX_SIMULTANEOS:-20}
+    volumes:
+      - facta_clt_data:/app/data
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:80/health',timeout=5)"]
+      interval: 20s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - app
+
+volumes:
+  facta_clt_data:
+  caddy_data:
